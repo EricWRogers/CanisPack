@@ -1,5 +1,0 @@
-[OPENGL VERSION]
-
-void main()
-{
-}

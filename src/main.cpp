@@ -11,16 +11,21 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <random>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#endif
 
 namespace
 {
@@ -32,10 +37,19 @@ namespace
         std::string projectName = "New Canis Project";
         std::string projectLocation = "";
         std::string openProjectPath = "";
+        std::string templateRepository = CANISPACK_TEMPLATE_REPOSITORY;
+        std::vector<std::string> templateTags = {};
+        std::string selectedTemplateTag = "";
         std::string engineExecutable = CANISPACK_ENGINE_EXECUTABLE;
         std::string message = "";
         bool messageIsError = false;
         bool closeAfterLaunch = false;
+    };
+
+    struct CommandResult
+    {
+        int exitCode = -1;
+        std::string output = "";
     };
 
     fs::path WeaklyCanonicalPath(const fs::path &_path)
@@ -148,42 +162,92 @@ namespace
         return sanitized.empty() ? "NewCanisProject" : sanitized;
     }
 
-    YAML::Node SequenceNode(std::initializer_list<double> _values)
+    std::string ShellQuote(const std::string &_value)
     {
-        YAML::Node node(YAML::NodeType::Sequence);
-        for (double value : _values)
-            node.push_back(value);
-        return node;
+#if defined(_WIN32)
+        std::string quoted = "\"";
+        for (char c : _value)
+        {
+            if (c == '"' || c == '\\')
+                quoted.push_back('\\');
+            quoted.push_back(c);
+        }
+        quoted.push_back('"');
+        return quoted;
+#else
+        std::string quoted = "'";
+        for (char c : _value)
+        {
+            if (c == '\'')
+                quoted += "'\\''";
+            else
+                quoted.push_back(c);
+        }
+        quoted.push_back('\'');
+        return quoted;
+#endif
     }
 
-    std::uint64_t MakeId()
+    CommandResult RunCommandCapture(const std::string &_command)
     {
-        static std::random_device randomDevice;
-        static std::mt19937_64 generator(randomDevice());
-        const std::uint64_t value = generator();
-        return value == 0u ? 1u : value;
+        CommandResult result;
+        const std::string command = _command + " 2>&1";
+
+#if defined(_WIN32)
+        FILE *pipe = _popen(command.c_str(), "r");
+#else
+        FILE *pipe = popen(command.c_str(), "r");
+#endif
+
+        if (pipe == nullptr)
+        {
+            result.output = "Could not start command.";
+            return result;
+        }
+
+        std::array<char, 4096> buffer = {};
+        while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+            result.output += buffer.data();
+
+#if defined(_WIN32)
+        result.exitCode = _pclose(pipe);
+#else
+        const int status = pclose(pipe);
+        result.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : status;
+#endif
+
+        return result;
     }
 
-    YAML::Node AssetReferenceNode(const std::string &_path)
+    std::vector<std::string> ParseTagList(const std::string &_gitOutput)
     {
-        YAML::Node node(YAML::NodeType::Map);
-        node["path"] = _path;
-        return node;
-    }
+        std::vector<std::string> tags;
+        std::size_t lineStart = 0u;
+        constexpr const char *tagPrefix = "refs/tags/";
 
-    YAML::Node TransformNode(
-        std::initializer_list<double> _position,
-        std::initializer_list<double> _rotation,
-        std::initializer_list<double> _scale)
-    {
-        YAML::Node node(YAML::NodeType::Map);
-        node["active"] = true;
-        node["position"] = SequenceNode(_position);
-        node["rotation"] = SequenceNode(_rotation);
-        node["scale"] = SequenceNode(_scale);
-        node["parent"] = 0;
-        node["children"] = YAML::Node(YAML::NodeType::Sequence);
-        return node;
+        while (lineStart < _gitOutput.size())
+        {
+            std::size_t lineEnd = _gitOutput.find('\n', lineStart);
+            if (lineEnd == std::string::npos)
+                lineEnd = _gitOutput.size();
+
+            const std::string line = _gitOutput.substr(lineStart, lineEnd - lineStart);
+            const std::size_t refStart = line.find(tagPrefix);
+            if (refStart != std::string::npos)
+            {
+                std::string tag = line.substr(refStart + std::char_traits<char>::length(tagPrefix));
+                if (!tag.empty() && tag.ends_with("^{}"))
+                    tag.resize(tag.size() - 3u);
+                if (!tag.empty())
+                    tags.push_back(tag);
+            }
+
+            lineStart = lineEnd + 1u;
+        }
+
+        std::sort(tags.begin(), tags.end());
+        tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
+        return tags;
     }
 
     void SetMessage(AppState &_state, std::string _message, bool _isError)
@@ -209,6 +273,41 @@ namespace
             _state.recentProjects.resize(maxRecentProjects);
     }
 
+    bool RefreshTemplateTags(AppState &_state, std::string &_outError)
+    {
+        const std::string repository = TrimCopy(_state.templateRepository);
+        if (repository.empty())
+        {
+            _outError = "Template repository is empty.";
+            return false;
+        }
+
+        const CommandResult result = RunCommandCapture("git ls-remote --tags --refs " + ShellQuote(repository));
+        if (result.exitCode != 0)
+        {
+            _outError = "Could not fetch template releases.";
+            if (!result.output.empty())
+                _outError += "\n" + result.output;
+            return false;
+        }
+
+        std::vector<std::string> tags = ParseTagList(result.output);
+        if (tags.empty())
+        {
+            _outError = "Template repository has no release tags.";
+            return false;
+        }
+
+        const bool keepSelection = !TrimCopy(_state.selectedTemplateTag).empty() &&
+            std::find(tags.begin(), tags.end(), _state.selectedTemplateTag) != tags.end();
+
+        _state.templateTags = std::move(tags);
+        if (!keepSelection)
+            _state.selectedTemplateTag = _state.templateTags.back();
+
+        return true;
+    }
+
     void LoadConfig(AppState &_state)
     {
         const fs::path configPath = GetConfigPath();
@@ -218,6 +317,8 @@ namespace
         try
         {
             const YAML::Node root = YAML::LoadFile(configPath.string());
+            _state.templateRepository = root["templateRepository"].as<std::string>(_state.templateRepository);
+            _state.selectedTemplateTag = root["templateRelease"].as<std::string>(_state.selectedTemplateTag);
             _state.engineExecutable = root["engineExecutable"].as<std::string>(_state.engineExecutable);
             _state.closeAfterLaunch = root["closeAfterLaunch"].as<bool>(_state.closeAfterLaunch);
 
@@ -238,6 +339,8 @@ namespace
     void SaveConfig(const AppState &_state)
     {
         YAML::Node root;
+        root["templateRepository"] = _state.templateRepository;
+        root["templateRelease"] = _state.selectedTemplateTag;
         root["engineExecutable"] = _state.engineExecutable;
         root["closeAfterLaunch"] = _state.closeAfterLaunch;
 
@@ -257,177 +360,51 @@ namespace
             out << root;
     }
 
-    bool CopyDirectoryContents(const fs::path &_source, const fs::path &_destination, std::string &_outError)
+    bool CloneTemplateProject(const AppState &_state, const fs::path &_projectPath, std::string &_outError)
     {
-        std::error_code ec;
-        if (!fs::exists(_source, ec) || !fs::is_directory(_source, ec))
+        const std::string repository = TrimCopy(_state.templateRepository);
+        const std::string release = TrimCopy(_state.selectedTemplateTag);
+        if (repository.empty())
         {
-            _outError = "Template folder was not found: " + _source.generic_string();
+            _outError = "Template repository is empty.";
             return false;
         }
 
-        fs::create_directories(_destination, ec);
+        if (release.empty())
+        {
+            _outError = "Choose a template release first.";
+            return false;
+        }
+
+        std::error_code ec;
+        fs::create_directories(_projectPath.parent_path(), ec);
         if (ec)
         {
-            _outError = "Could not create folder: " + _destination.generic_string();
+            _outError = "Could not create project parent folder.";
             return false;
         }
 
-        for (const fs::directory_entry &entry : fs::recursive_directory_iterator(_source, ec))
+        const std::string command =
+            "git clone --depth 1 --branch " + ShellQuote(release) +
+            " --single-branch -- " + ShellQuote(repository) + " " + ShellQuote(_projectPath.string());
+
+        const CommandResult result = RunCommandCapture(command);
+        if (result.exitCode != 0)
         {
-            if (ec)
-            {
-                _outError = "Could not read template folder: " + _source.generic_string();
-                return false;
-            }
+            _outError = "Could not clone template release.";
+            if (!result.output.empty())
+                _outError += "\n" + result.output;
+            return false;
+        }
 
-            const fs::path relativePath = fs::relative(entry.path(), _source, ec);
-            if (ec)
-            {
-                _outError = "Could not resolve template path.";
-                return false;
-            }
-
-            const fs::path destinationPath = _destination / relativePath;
-            if (entry.is_directory(ec))
-            {
-                fs::create_directories(destinationPath, ec);
-            }
-            else if (entry.is_regular_file(ec))
-            {
-                fs::create_directories(destinationPath.parent_path(), ec);
-                fs::copy_file(entry.path(), destinationPath, fs::copy_options::overwrite_existing, ec);
-            }
-
-            if (ec)
-            {
-                _outError = "Could not copy template item: " + entry.path().generic_string();
-                return false;
-            }
+        fs::remove_all(_projectPath / ".git", ec);
+        if (ec)
+        {
+            _outError = "Template cloned, but its git metadata could not be removed.";
+            return false;
         }
 
         return true;
-    }
-
-    bool WriteProjectConfigFile(const fs::path &_projectPath, std::string &_outError)
-    {
-        YAML::Node root;
-        root["useFrameLimit"] = false;
-        root["frameLimit"] = 120;
-        root["frameLimitEditor"] = 120;
-        root["overrideSeed"] = false;
-        root["seed"] = 0;
-        root["volume"] = 1.0;
-        root["musicVolume"] = 1.0;
-        root["sfxVolume"] = 1.0;
-        root["mute"] = false;
-        root["editor"] = true;
-        root["syncMode"] = 0;
-        root["iconUUID"] = "0";
-        root["launchScene"] = "assets/scenes/default.scene";
-        root["launchExecutablePath"] = "";
-        root["launchWorkingDirectory"] = "";
-        root["launchArguments"] = "";
-        root["editorWindowWidth"] = 1280;
-        root["editorWindowHeight"] = 720;
-        root["targetGameWidth"] = 1280;
-        root["targetGameHeight"] = 720;
-
-        const fs::path configPath = _projectPath / "project_settings" / "project.canis";
-        std::error_code ec;
-        fs::create_directories(configPath.parent_path(), ec);
-        if (ec)
-        {
-            _outError = "Could not create project settings.";
-            return false;
-        }
-
-        std::ofstream out(configPath);
-        if (!out.is_open())
-        {
-            _outError = "Could not write project.canis.";
-            return false;
-        }
-
-        out << root;
-        return out.good();
-    }
-
-    bool WriteDefaultSceneFile(const fs::path &_projectPath, std::string &_outError)
-    {
-        const fs::path scenePath = _projectPath / "assets" / "scenes" / "default.scene";
-        std::error_code ec;
-        fs::create_directories(scenePath.parent_path(), ec);
-        if (ec)
-        {
-            _outError = "Could not create scenes folder.";
-            return false;
-        }
-
-        YAML::Node environmentNode(YAML::NodeType::Map);
-        environmentNode["ClearColor"] = SequenceNode({ 0.12, 0.14, 0.17, 1.0 });
-        environmentNode["AmbientLight"] = SequenceNode({ 0.24, 0.26, 0.32, 1.0 });
-        environmentNode["AmbientLightIntensity"] = 1.0;
-        environmentNode["PostProcessAsset"] = AssetReferenceNode("assets/defaults/postprocess/default.postprocess");
-
-        YAML::Node cameraNode(YAML::NodeType::Map);
-        cameraNode["Entity"] = MakeId();
-        cameraNode["Name"] = "Camera";
-        cameraNode["Tag"] = "MainCamera";
-        cameraNode["Canis::Transform"] = TransformNode({ 0.0, 6.0, 14.0 }, { -0.38, 0.0, 0.0 }, { 1.0, 1.0, 1.0 });
-        YAML::Node cameraComponent(YAML::NodeType::Map);
-        cameraComponent["primary"] = true;
-        cameraComponent["fovDegrees"] = 60.0;
-        cameraComponent["nearClip"] = 0.1;
-        cameraComponent["farClip"] = 300.0;
-        cameraNode["Canis::Camera"] = cameraComponent;
-
-        YAML::Node lightNode(YAML::NodeType::Map);
-        lightNode["Entity"] = MakeId();
-        lightNode["Name"] = "Directional Light";
-        lightNode["Tag"] = "";
-        YAML::Node lightComponent(YAML::NodeType::Map);
-        lightComponent["enabled"] = true;
-        lightComponent["color"] = SequenceNode({ 1.0, 1.0, 1.0, 1.0 });
-        lightComponent["intensity"] = 1.0;
-        lightComponent["direction"] = SequenceNode({ -0.4, -1.0, -0.25 });
-        lightNode["Canis::DirectionalLight"] = lightComponent;
-
-        YAML::Node cubeNode(YAML::NodeType::Map);
-        cubeNode["Entity"] = MakeId();
-        cubeNode["Name"] = "Cube";
-        cubeNode["Tag"] = "";
-        cubeNode["Canis::Transform"] = TransformNode({ 0.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0 }, { 1.0, 1.0, 1.0 });
-        YAML::Node materialComponent(YAML::NodeType::Map);
-        materialComponent["color"] = SequenceNode({ 1.0, 1.0, 1.0, 1.0 });
-        materialComponent["MaterialAsset"] = AssetReferenceNode("assets/defaults/materials/default.material");
-        cubeNode["Canis::Material"] = materialComponent;
-        YAML::Node modelComponent(YAML::NodeType::Map);
-        modelComponent["color"] = SequenceNode({ 1.0, 1.0, 1.0, 1.0 });
-        modelComponent["ModelAsset"] = AssetReferenceNode("assets/defaults/models/cube.glb");
-        cubeNode["Canis::Model"] = modelComponent;
-
-        YAML::Node entitiesNode(YAML::NodeType::Sequence);
-        entitiesNode.push_back(cameraNode);
-        entitiesNode.push_back(lightNode);
-        entitiesNode.push_back(cubeNode);
-
-        YAML::Node root(YAML::NodeType::Map);
-        root["Environment"] = environmentNode;
-        root["Entities"] = entitiesNode;
-
-        YAML::Emitter out;
-        out << root;
-
-        std::ofstream file(scenePath);
-        if (!file.is_open())
-        {
-            _outError = "Could not write starter scene.";
-            return false;
-        }
-
-        file << out.c_str();
-        return file.good();
     }
 
     bool CreateProject(const AppState &_state, fs::path &_outProjectPath, std::string &_outError)
@@ -446,22 +423,18 @@ namespace
             return false;
         }
 
-        fs::create_directories(projectPath, ec);
-        if (ec)
+        if (!CloneTemplateProject(_state, projectPath, _outError))
         {
-            _outError = "Could not create project folder.";
+            fs::remove_all(projectPath, ec);
             return false;
         }
 
-        const fs::path templatePath = WeaklyCanonicalPath(CANISPACK_TEMPLATE_PROJECT_DIR);
-        if (!CopyDirectoryContents(templatePath / "assets", projectPath / "assets", _outError))
+        if (!IsProjectDirectory(projectPath))
+        {
+            _outError = "Template release did not contain a Canis project.";
+            fs::remove_all(projectPath, ec);
             return false;
-
-        if (!WriteProjectConfigFile(projectPath, _outError))
-            return false;
-
-        if (!WriteDefaultSceneFile(projectPath, _outError))
-            return false;
+        }
 
         _outProjectPath = WeaklyCanonicalPath(projectPath);
         return true;
@@ -610,6 +583,55 @@ namespace
         const std::string projectFolder = (fs::path(_state.projectLocation) / SanitizeProjectFolderName(_state.projectName)).generic_string();
         ImGui::TextDisabled("%s", projectFolder.c_str());
 
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Template");
+        if (ImGui::InputText("Repository", &_state.templateRepository))
+        {
+            _state.templateTags.clear();
+            _state.selectedTemplateTag.clear();
+            SaveConfig(_state);
+        }
+
+        const std::string releasePreview = _state.selectedTemplateTag.empty() ? "No release selected" : _state.selectedTemplateTag;
+        if (ImGui::BeginCombo("Release", releasePreview.c_str()))
+        {
+            if (_state.templateTags.empty())
+            {
+                ImGui::TextDisabled("No releases loaded");
+            }
+            else
+            {
+                for (auto tag = _state.templateTags.rbegin(); tag != _state.templateTags.rend(); ++tag)
+                {
+                    const bool selected = (*tag == _state.selectedTemplateTag);
+                    if (ImGui::Selectable(tag->c_str(), selected))
+                    {
+                        _state.selectedTemplateTag = *tag;
+                        SaveConfig(_state);
+                    }
+
+                    if (selected)
+                        ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        if (ImGui::Button("Refresh Releases", ImVec2(160.0f, 30.0f)))
+        {
+            std::string error;
+            if (RefreshTemplateTags(_state, error))
+            {
+                SaveConfig(_state);
+                SetMessage(_state, "Loaded " + std::to_string(_state.templateTags.size()) + " template release(s).", false);
+            }
+            else
+            {
+                SetMessage(_state, error.empty() ? "Could not load template releases." : error, true);
+            }
+        }
+
+        ImGui::Spacing();
         if (ImGui::Button("Create and Open", ImVec2(160.0f, 34.0f)))
         {
             fs::path projectPath;
@@ -694,9 +716,16 @@ int main(int, char **)
 
     AppState state;
     state.projectLocation = GetDefaultProjectsDirectory().generic_string();
+    LoadConfig(state);
     if (const char *engineExecutable = std::getenv("CANIS_ENGINE_EXECUTABLE"))
         state.engineExecutable = engineExecutable;
-    LoadConfig(state);
+    if (const char *templateRepository = std::getenv("CANIS_TEMPLATE_REPOSITORY"))
+        state.templateRepository = templateRepository;
+    {
+        std::string error;
+        if (!RefreshTemplateTags(state, error))
+            SetMessage(state, error.empty() ? "Could not load template releases." : error, true);
+    }
 
     bool running = true;
     while (running)

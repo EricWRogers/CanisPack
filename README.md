@@ -9,11 +9,8 @@ This repository builds a standalone launcher with CMake. It keeps dependencies s
 - Create a Canis project folder.
 - Open an existing Canis project.
 - Remember recent projects.
-- Scaffold required starter folders and files:
-  - `assets/defaults/`
-  - `assets/shaders/`
-  - `assets/scenes/default.scene`
-  - `project_settings/project.canis`
+- Clone a tagged CanisTemplate release for new projects.
+- Choose the template release from the available Git tags.
 
 ## Setup
 
@@ -41,7 +38,17 @@ Set the engine executable in the UI, or pass it when launching:
 CANIS_ENGINE_EXECUTABLE=/path/to/c-engine ./build/bin/CanisPack
 ```
 
-Starter project files live in `templates/basic`, so CanisPack does not need to vendor a whole game project just to create new projects.
+New projects are cloned from:
+
+```text
+git@github.com:EricWRogers/CanisTemplate.git
+```
+
+You can override that in the UI or with:
+
+```bash
+CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git ./build/bin/CanisPack
+```
 
 ## Direction
 
@@ -52,4 +59,4 @@ CanisPack should eventually become a standalone launcher that can:
 - Track recent projects.
 - Manage Canis engine versions.
 - Package or export projects.
-- Install templates and sample projects.
+- Install more templates and sample projects.

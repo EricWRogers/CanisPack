@@ -7,8 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 set(CANISPACK_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor" CACHE PATH "CanisPack dependency submodule directory")
-set(CANISPACK_TEMPLATE_PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/templates/basic" CACHE PATH "Template project copied when creating projects")
 set(CANISPACK_ENGINE_REPO "${CANISPACK_VENDOR_DIR}/canis" CACHE PATH "Canis engine source checkout")
+set(CANISPACK_TEMPLATE_REPOSITORY "git@github.com:EricWRogers/CanisTemplate.git" CACHE STRING "Default Canis project template repository")
 
 set(CANISPACK_ENGINE_EXECUTABLE
     ""
@@ -73,5 +73,5 @@ target_link_libraries(CanisPack PRIVATE
 target_compile_definitions(CanisPack PRIVATE
     CANISPACK_VERSION="${PROJECT_VERSION}"
     CANISPACK_ENGINE_EXECUTABLE="${CANISPACK_ENGINE_EXECUTABLE}"
-    CANISPACK_TEMPLATE_PROJECT_DIR="${CANISPACK_TEMPLATE_PROJECT_DIR}"
+    CANISPACK_TEMPLATE_REPOSITORY="${CANISPACK_TEMPLATE_REPOSITORY}"
 )
