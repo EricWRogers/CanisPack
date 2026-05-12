@@ -2,7 +2,7 @@
 
 CanisPack is the project launcher for Canis, inspired by Unity Hub and Godot's project manager.
 
-The first implementation currently lives inside the Canis editor runtime in `BathBattleCanis/canis/src/ProjectHub.cpp`. This repository is the home for growing it into its own tool: project creation, project opening, recent projects, templates, and future package/version management.
+This repository builds a standalone launcher with CMake. It keeps dependencies small: `vendor/canis` for the engine source reference, plus SDL, ImGui, and yaml-cpp as direct submodules.
 
 ## Current Features
 
@@ -15,21 +15,33 @@ The first implementation currently lives inside the Canis editor runtime in `Bat
   - `assets/scenes/default.scene`
   - `project_settings/project.canis`
 
-## Run The Current CanisPack Hub
+## Setup
 
-From the engine repo:
-
-```bash
-cd /home/eric/Git/BathBattleCanis
-cmake --build build --parallel
-CANIS_PROJECT_HUB=1 ./project/c-engine
-```
-
-Or use the helper script from this repo:
+Initialize submodules:
 
 ```bash
-./scripts/run-current-hub.sh
+git submodule update --init vendor/canis vendor/SDL vendor/imgui vendor/yaml-cpp
 ```
+
+Build:
+
+```bash
+./scripts/build.sh
+```
+
+Run:
+
+```bash
+./scripts/run.sh
+```
+
+Set the engine executable in the UI, or pass it when launching:
+
+```bash
+CANIS_ENGINE_EXECUTABLE=/path/to/c-engine ./build/bin/CanisPack
+```
+
+Starter project files live in `templates/basic`, so CanisPack does not need to vendor a whole game project just to create new projects.
 
 ## Direction
 
@@ -41,4 +53,3 @@ CanisPack should eventually become a standalone launcher that can:
 - Manage Canis engine versions.
 - Package or export projects.
 - Install templates and sample projects.
-

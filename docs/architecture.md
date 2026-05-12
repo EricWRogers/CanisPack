@@ -1,34 +1,45 @@
 # CanisPack Architecture
 
-CanisPack starts as an engine-integrated launcher and can later split into a standalone app.
+CanisPack is a standalone CMake launcher for Canis projects.
 
-## Phase 1: Integrated Hub
+## Standalone App
 
-The current hub is compiled into `c-engine` for editor desktop builds.
+The standalone app lives in this repo and builds `CanisPack`.
 
 Startup flow:
 
-1. `App::Run()` checks `CANIS_PROJECT`.
-2. If no project is provided, it opens CanisPack.
-3. CanisPack returns a selected project path.
-4. The engine switches the current working directory to that project.
-5. The normal editor runtime initializes.
+1. CanisPack loads recent projects from `user_settings/canispack.conf`.
+2. A user creates or opens a project.
+3. CanisPack launches `c-engine` as a background process.
+4. The selected project is passed with `CANIS_PROJECT=/path/to/project`.
+5. The engine opens that project directly.
+
+The standalone app uses small direct submodules:
+
+```text
+vendor/canis/
+vendor/SDL/
+vendor/imgui/
+vendor/yaml-cpp/
+```
+
+Starter project assets live in `templates/basic/`. CanisPack should not depend on a full game repository.
 
 Useful environment variables:
 
 - `CANIS_PROJECT=/path/to/project` opens a project directly.
-- `CANIS_PROJECT_HUB=1` forces the hub.
-- `CANIS_SKIP_PROJECT_HUB=1` keeps the old direct-open behavior.
+- `CANIS_PROJECT_HUB=0` tells the engine not to show its own project picker.
+- `CANIS_SKIP_PROJECT_HUB=1` keeps launch behavior direct.
 
-## Phase 2: Standalone Launcher
+## Later
 
-Move the launcher UI and project creation code into this repo while keeping a small launch contract with Canis:
+Keep the small launch contract with Canis:
 
 ```bash
 CANIS_PROJECT=/path/to/project /path/to/c-engine
 ```
 
-The standalone app can remain lightweight and still use the installed Canis runtime to open projects.
+That keeps CanisPack lightweight while Canis owns the editor/runtime.
 
 ## Project Shape
 
@@ -42,4 +53,3 @@ project-name/
 ```
 
 New projects should include default assets and shaders so the editor can immediately create cubes, sprites, materials, and starter scenes.
-

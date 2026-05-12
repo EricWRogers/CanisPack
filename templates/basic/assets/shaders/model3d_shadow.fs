@@ -1,0 +1,5 @@
+[OPENGL VERSION]
+
+void main()
+{
+}

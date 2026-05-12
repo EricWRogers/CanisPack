@@ -1,0 +1,24 @@
+passes:
+  - name: SSAO
+    enabled: true
+    shader:
+      path: assets/shaders/postprocess_ssao.vs
+    settings:
+      ssaoRadius: 0.85
+      ssaoBias: 0.026
+      ssaoStrength: 1.23
+  - name: Bloom
+    enabled: true
+    shader:
+      path: assets/shaders/postprocess_bloom.vs
+    settings:
+      bloomThreshold: 0.81
+      bloomIntensity: 0.85
+  - name: Color Correction
+    enabled: true
+    shader:
+      path: assets/shaders/postprocess_color_correction.vs
+    settings:
+      exposure: 1.02
+      contrast: 0.99
+      saturation: 1.39
