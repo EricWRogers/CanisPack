@@ -1,0 +1,10 @@
+build/
+.cache/
+.idea/
+.vscode/
+*.user
+*.log
+*.tmp
+*.swp
+*.swo
+
