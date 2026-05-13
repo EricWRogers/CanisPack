@@ -52,6 +52,25 @@ namespace
         bool popupOpen = false;
     };
 
+    enum class FolderDialogTarget
+    {
+        None,
+        CreateProjectLocation,
+        OpenExistingProject
+    };
+
+    struct FolderDialogState
+    {
+        std::mutex mutex;
+        std::string defaultLocation = "";
+        std::string selectedPath = "";
+        std::string error = "";
+        FolderDialogTarget target = FolderDialogTarget::None;
+        bool active = false;
+        bool pending = false;
+        bool canceled = false;
+    };
+
     struct AppState
     {
         std::vector<fs::path> recentProjects = {};
@@ -65,6 +84,7 @@ namespace
         bool messageIsError = false;
         bool closeAfterLaunch = false;
         CreateProjectTask createTask = {};
+        FolderDialogState folderDialog = {};
     };
 
     struct ProjectCreateSettings
@@ -216,6 +236,27 @@ namespace
             --end;
 
         return _value.substr(begin, end - begin);
+    }
+
+    std::string GetFolderDialogDefaultLocation(const std::string &_location)
+    {
+        fs::path path = TrimCopy(_location);
+        if (path.empty())
+            path = GetDefaultProjectsDirectory();
+
+        while (!path.empty())
+        {
+            if (IsDirectory(path))
+                return WeaklyCanonicalPath(path).string();
+
+            const fs::path parentPath = path.parent_path();
+            if (parentPath == path)
+                break;
+            path = parentPath;
+        }
+
+        std::error_code ec;
+        return fs::current_path(ec).string();
     }
 
     std::string SanitizeProjectFolderName(const std::string &_name)
@@ -377,6 +418,63 @@ namespace
     {
         _state.message = std::move(_message);
         _state.messageIsError = _isError;
+    }
+
+    void SDLCALL OnFolderDialogResult(void *_userdata, const char * const *_filelist, int)
+    {
+        FolderDialogState *dialog = static_cast<FolderDialogState*>(_userdata);
+        if (dialog == nullptr)
+            return;
+
+        std::lock_guard<std::mutex> lock(dialog->mutex);
+        dialog->selectedPath.clear();
+        dialog->error.clear();
+        dialog->canceled = false;
+        dialog->pending = true;
+        dialog->active = false;
+
+        if (_filelist == nullptr)
+        {
+            dialog->error = SDL_GetError();
+            if (dialog->error.empty())
+                dialog->error = "Could not open folder dialog.";
+            return;
+        }
+
+        if (_filelist[0] == nullptr)
+        {
+            dialog->canceled = true;
+            return;
+        }
+
+        dialog->selectedPath = _filelist[0];
+    }
+
+    void ShowFolderDialog(
+        AppState &_state,
+        SDL_Window *_window,
+        FolderDialogTarget _target,
+        const std::string &_defaultLocation)
+    {
+        {
+            std::lock_guard<std::mutex> lock(_state.folderDialog.mutex);
+            if (_state.folderDialog.active)
+            {
+                SetMessage(_state, "A folder picker is already open.", true);
+                return;
+            }
+
+            _state.folderDialog.defaultLocation = _defaultLocation;
+            _state.folderDialog.selectedPath.clear();
+            _state.folderDialog.error.clear();
+            _state.folderDialog.target = _target;
+            _state.folderDialog.pending = false;
+            _state.folderDialog.canceled = false;
+            _state.folderDialog.active = true;
+        }
+
+        const char *defaultLocation = _state.folderDialog.defaultLocation.empty() ? nullptr : _state.folderDialog.defaultLocation.c_str();
+        SDL_ShowOpenFolderDialog(OnFolderDialogResult, &_state.folderDialog, _window, defaultLocation, false);
     }
 
     void AddRecentProject(AppState &_state, const fs::path &_projectPath)
@@ -1018,9 +1116,60 @@ namespace
             _running = false;
     }
 
-    void DrawCanisPack(AppState &_state, bool &_running)
+    void ProcessFolderDialogResult(AppState &_state, bool &_running)
+    {
+        std::string selectedPath;
+        std::string error;
+        FolderDialogTarget target = FolderDialogTarget::None;
+        bool pending = false;
+        bool canceled = false;
+
+        {
+            std::lock_guard<std::mutex> lock(_state.folderDialog.mutex);
+            pending = _state.folderDialog.pending;
+            if (pending)
+            {
+                selectedPath = _state.folderDialog.selectedPath;
+                error = _state.folderDialog.error;
+                target = _state.folderDialog.target;
+                canceled = _state.folderDialog.canceled;
+                _state.folderDialog.pending = false;
+                _state.folderDialog.target = FolderDialogTarget::None;
+            }
+        }
+
+        if (!pending || canceled)
+            return;
+
+        if (!error.empty())
+        {
+            SetMessage(_state, error, true);
+            return;
+        }
+
+        if (selectedPath.empty())
+            return;
+
+        const fs::path folderPath = WeaklyCanonicalPath(fs::path(selectedPath));
+        switch (target)
+        {
+            case FolderDialogTarget::CreateProjectLocation:
+                _state.projectLocation = folderPath.generic_string();
+                SetMessage(_state, "Project location selected.", false);
+                break;
+            case FolderDialogTarget::OpenExistingProject:
+                _state.openProjectPath = folderPath.generic_string();
+                OpenProject(_state, folderPath, _running);
+                break;
+            case FolderDialogTarget::None:
+                break;
+        }
+    }
+
+    void DrawCanisPack(AppState &_state, bool &_running, SDL_Window *_window)
     {
         ProcessCreateTaskResult(_state, _running);
+        ProcessFolderDialogResult(_state, _running);
 
         ImGuiIO &io = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -1061,7 +1210,19 @@ namespace
         ImGui::TextUnformatted("Create Project");
         ImGui::Spacing();
         ImGui::InputText("Name", &_state.projectName);
-        ImGui::InputText("Location", &_state.projectLocation);
+
+        ImGui::TextUnformatted("Location");
+        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 104.0f));
+        ImGui::InputText("##ProjectLocation", &_state.projectLocation);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse##ProjectLocation", ImVec2(96.0f, 0.0f)))
+        {
+            const std::string defaultLocation = _state.projectLocation.empty() ?
+                GetDefaultProjectsDirectory().generic_string() :
+                _state.projectLocation;
+            ShowFolderDialog(_state, _window, FolderDialogTarget::CreateProjectLocation, GetFolderDialogDefaultLocation(defaultLocation));
+        }
+
         const std::string projectFolder = (fs::path(_state.projectLocation) / SanitizeProjectFolderName(_state.projectName)).generic_string();
         ImGui::TextDisabled("%s", projectFolder.c_str());
 
@@ -1130,7 +1291,18 @@ namespace
         ImGui::Separator();
         ImGui::Spacing();
         ImGui::TextUnformatted("Open Existing");
-        ImGui::InputText("Project Path", &_state.openProjectPath);
+        ImGui::TextUnformatted("Project Path");
+        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 144.0f));
+        ImGui::InputText("##OpenProjectPath", &_state.openProjectPath);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse and Open##OpenProjectPath", ImVec2(136.0f, 0.0f)))
+        {
+            const std::string defaultLocation = !_state.openProjectPath.empty() ?
+                _state.openProjectPath :
+                (_state.projectLocation.empty() ? GetDefaultProjectsDirectory().generic_string() : _state.projectLocation);
+            ShowFolderDialog(_state, _window, FolderDialogTarget::OpenExistingProject, GetFolderDialogDefaultLocation(defaultLocation));
+        }
+
         if (ImGui::Button("Open Project", ImVec2(140.0f, 34.0f)))
             OpenProject(_state, _state.openProjectPath, _running);
 
@@ -1226,7 +1398,7 @@ int main(int, char **)
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
-        DrawCanisPack(state, running);
+        DrawCanisPack(state, running, window);
 
         ImGui::Render();
 
