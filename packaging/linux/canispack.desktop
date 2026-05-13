@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=CanisPack
+Comment=Project launcher for the Canis engine
+Exec=CanisPack
+Icon=canispack
+Terminal=false
+Categories=Development;IDE;

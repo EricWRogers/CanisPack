@@ -97,14 +97,43 @@ namespace
         return fs::current_path(ec);
     }
 
+    fs::path GetConfigBasePath()
+    {
+#if defined(_WIN32)
+        if (const char *appData = std::getenv("APPDATA"))
+            return fs::path(appData);
+#endif
+
+        if (const char *xdgConfigHome = std::getenv("XDG_CONFIG_HOME"))
+        {
+            if (xdgConfigHome[0] != '\0')
+                return fs::path(xdgConfigHome);
+        }
+
+        if (const char *home = std::getenv("HOME"))
+            return fs::path(home) / ".config";
+
+        return GetExecutableBasePath() / "user_settings";
+    }
+
     fs::path GetConfigPath()
+    {
+        return GetConfigBasePath() / "canispack" / "canispack.conf";
+    }
+
+    fs::path GetLegacyConfigPath()
     {
         return GetExecutableBasePath() / "user_settings" / "canispack.conf";
     }
 
     fs::path GetAssetPath(const fs::path &_assetPath)
     {
-        return GetExecutableBasePath() / "assets" / _assetPath;
+        const fs::path localAssetPath = GetExecutableBasePath() / "assets" / _assetPath;
+        std::error_code ec;
+        if (fs::exists(localAssetPath, ec) && fs::is_regular_file(localAssetPath, ec))
+            return localAssetPath;
+
+        return fs::path(CANISPACK_INSTALL_ASSET_DIR) / _assetPath;
     }
 
     void SetCanisPackWindowIcon(SDL_Window *_window)
@@ -404,9 +433,15 @@ namespace
 
     void LoadConfig(AppState &_state)
     {
-        const fs::path configPath = GetConfigPath();
+        fs::path configPath = GetConfigPath();
         if (!IsFile(configPath))
-            return;
+        {
+            const fs::path legacyConfigPath = GetLegacyConfigPath();
+            if (!IsFile(legacyConfigPath))
+                return;
+
+            configPath = legacyConfigPath;
+        }
 
         try
         {

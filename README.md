@@ -29,10 +29,22 @@ Build:
 ./scripts/build.sh
 ```
 
+Install to a prefix:
+
+```bash
+cmake --install build --prefix /usr/local
+```
+
 Run:
 
 ```bash
 ./scripts/run.sh
+```
+
+CanisPack stores user settings in:
+
+```text
+~/.config/canispack/canispack.conf
 ```
 
 New projects are cloned from:

@@ -4,11 +4,11 @@ CanisPack is a standalone CMake launcher for Canis projects.
 
 ## Standalone App
 
-The standalone app lives in this repo and builds `CanisPack`.
+The standalone app lives in this repo and builds `CanisPack`. Installed builds place the executable under the install prefix's binary directory, app assets under `share/canispack/assets`, a desktop entry under `share/applications`, and the app icon under `share/icons/hicolor/32x32/apps`.
 
 Startup flow:
 
-1. CanisPack loads recent projects from `user_settings/canispack.conf`.
+1. CanisPack loads recent projects from `~/.config/canispack/canispack.conf`.
 2. A user creates or opens a project.
 3. For new projects, CanisPack fetches release tags from CanisTemplate.
 4. CanisPack clones the selected template tag with submodules into the new project folder.

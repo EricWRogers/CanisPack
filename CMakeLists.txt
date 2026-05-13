@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(CanisPack VERSION 0.1.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -69,10 +71,28 @@ target_link_libraries(CanisPack PRIVATE
 target_compile_definitions(CanisPack PRIVATE
     CANISPACK_VERSION="${PROJECT_VERSION}"
     CANISPACK_TEMPLATE_REPOSITORY="${CANISPACK_TEMPLATE_REPOSITORY}"
+    CANISPACK_INSTALL_ASSET_DIR="${CMAKE_INSTALL_FULL_DATADIR}/canispack/assets"
 )
 
 add_custom_command(TARGET CanisPack POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${CANISPACK_ASSET_DIR}"
         "$<TARGET_FILE_DIR:CanisPack>/assets"
+)
+
+install(TARGETS CanisPack
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+
+install(DIRECTORY "${CANISPACK_ASSET_DIR}/"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/canispack/assets"
+)
+
+install(FILES "${CANISPACK_ASSET_DIR}/canispack_icon.png"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/32x32/apps"
+    RENAME "canispack.png"
+)
+
+install(FILES "packaging/linux/canispack.desktop"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
 )
