@@ -31,8 +31,6 @@ Starter workspaces live in `git@github.com:EricWRogers/CanisTemplate.git`. Canis
 Useful environment variables:
 
 - `CANIS_PROJECT=/path/to/project` opens a project directly.
-- `CANIS_PROJECT_HUB=0` tells the engine not to show its own project picker.
-- `CANIS_SKIP_PROJECT_HUB=1` keeps launch behavior direct.
 - `CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git` overrides the default template repository.
 
 ## Later

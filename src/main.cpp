@@ -787,10 +787,7 @@ namespace
             return false;
         }
 
-        bool success = SDL_SetEnvironmentVariable(environment, "CANIS_PROJECT", projectPath.string().c_str(), true);
-        success = success && SDL_SetEnvironmentVariable(environment, "CANIS_PROJECT_HUB", "0", true);
-        success = success && SDL_SetEnvironmentVariable(environment, "CANIS_SKIP_PROJECT_HUB", "1", true);
-        if (!success)
+        if (!SDL_SetEnvironmentVariable(environment, "CANIS_PROJECT", projectPath.string().c_str(), true))
         {
             _outError = SDL_GetError();
             SDL_DestroyEnvironment(environment);
@@ -805,7 +802,7 @@ namespace
             return false;
         }
 
-        success = SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<const char**>(args.data()));
+        bool success = SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<const char**>(args.data()));
         success = success && SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
         success = success && SDL_SetStringProperty(properties, SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING, executablePath.parent_path().string().c_str());
         success = success && SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
