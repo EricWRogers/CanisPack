@@ -10,11 +10,6 @@ set(CANISPACK_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor" CACHE PATH "CanisP
 set(CANISPACK_ENGINE_REPO "${CANISPACK_VENDOR_DIR}/canis" CACHE PATH "Canis engine source checkout")
 set(CANISPACK_TEMPLATE_REPOSITORY "git@github.com:EricWRogers/CanisTemplate.git" CACHE STRING "Default Canis project template repository")
 
-set(CANISPACK_ENGINE_EXECUTABLE
-    ""
-    CACHE FILEPATH
-    "Canis engine executable launched by CanisPack")
-
 if(NOT EXISTS "${CANISPACK_ENGINE_REPO}/CMakeLists.txt")
     message(FATAL_ERROR "Missing Canis engine submodule. Run: git submodule update --init vendor/canis vendor/SDL vendor/imgui vendor/yaml-cpp")
 endif()
@@ -72,6 +67,5 @@ target_link_libraries(CanisPack PRIVATE
 
 target_compile_definitions(CanisPack PRIVATE
     CANISPACK_VERSION="${PROJECT_VERSION}"
-    CANISPACK_ENGINE_EXECUTABLE="${CANISPACK_ENGINE_EXECUTABLE}"
     CANISPACK_TEMPLATE_REPOSITORY="${CANISPACK_TEMPLATE_REPOSITORY}"
 )

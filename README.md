@@ -12,6 +12,7 @@ This repository builds a standalone launcher with CMake. It keeps dependencies s
 - Clone a tagged CanisTemplate release, including engine submodules, for new projects.
 - Show clone/build progress while creating projects.
 - Build newly created projects before launching their editor.
+- Launch projects using the editor executable built inside each project workspace.
 - Choose the template release from the available Git tags.
 
 ## Setup
@@ -32,12 +33,6 @@ Run:
 
 ```bash
 ./scripts/run.sh
-```
-
-Set the engine executable in the UI, or pass it when launching:
-
-```bash
-CANIS_ENGINE_EXECUTABLE=/path/to/c-engine ./build/bin/CanisPack
 ```
 
 New projects are cloned from:

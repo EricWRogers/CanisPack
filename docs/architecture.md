@@ -40,10 +40,10 @@ Useful environment variables:
 Keep the small launch contract with Canis:
 
 ```bash
-CANIS_PROJECT=/path/to/project /path/to/c-engine
+CANIS_PROJECT=/path/to/project /path/to/project/c-engine
 ```
 
-That keeps CanisPack lightweight while Canis owns the editor/runtime.
+That keeps CanisPack lightweight while each project workspace owns the editor/runtime it was built with.
 
 ## Project Shape
 

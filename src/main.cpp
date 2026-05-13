@@ -61,7 +61,6 @@ namespace
         std::string templateRepository = CANISPACK_TEMPLATE_REPOSITORY;
         std::vector<std::string> templateTags = {};
         std::string selectedTemplateTag = "";
-        std::string engineExecutable = CANISPACK_ENGINE_EXECUTABLE;
         std::string message = "";
         bool messageIsError = false;
         bool closeAfterLaunch = false;
@@ -395,7 +394,6 @@ namespace
             const YAML::Node root = YAML::LoadFile(configPath.string());
             _state.templateRepository = root["templateRepository"].as<std::string>(_state.templateRepository);
             _state.selectedTemplateTag = root["templateRelease"].as<std::string>(_state.selectedTemplateTag);
-            _state.engineExecutable = root["engineExecutable"].as<std::string>(_state.engineExecutable);
             _state.closeAfterLaunch = root["closeAfterLaunch"].as<bool>(_state.closeAfterLaunch);
 
             if (const YAML::Node recent = root["recentProjects"])
@@ -417,7 +415,6 @@ namespace
         YAML::Node root;
         root["templateRepository"] = _state.templateRepository;
         root["templateRelease"] = _state.selectedTemplateTag;
-        root["engineExecutable"] = _state.engineExecutable;
         root["closeAfterLaunch"] = _state.closeAfterLaunch;
 
         YAML::Node recent(YAML::NodeType::Sequence);
@@ -488,6 +485,19 @@ namespace
         return _workspacePath / "project" / "c-engine.exe";
 #else
         return _workspacePath / "project" / "c-engine";
+#endif
+    }
+
+    fs::path GetProjectEditorExecutable(const fs::path &_projectPath)
+    {
+        const fs::path projectPath = WeaklyCanonicalPath(_projectPath);
+        if (projectPath.filename() == "project" && !projectPath.parent_path().empty())
+            return GetBuiltEditorExecutable(projectPath.parent_path());
+
+#if defined(_WIN32)
+        return projectPath / "c-engine.exe";
+#else
+        return projectPath / "c-engine";
 #endif
     }
 
@@ -671,9 +681,16 @@ namespace
         return true;
     }
 
-    bool LaunchProject(const AppState &_state, const fs::path &_projectPath, std::string &_outError)
+    bool LaunchProject(const fs::path &_projectPath, std::string &_outError)
     {
-        return LaunchProjectWithExecutable(_state.engineExecutable, _projectPath, _outError);
+        const fs::path executablePath = GetProjectEditorExecutable(_projectPath);
+        if (!IsFile(executablePath))
+        {
+            _outError = "Project editor executable not found: " + executablePath.generic_string();
+            return false;
+        }
+
+        return LaunchProjectWithExecutable(executablePath, _projectPath, _outError);
     }
 
     bool BuildProjectWorkspace(const fs::path &_workspacePath, CreateProjectTask &_task, std::string &_outError)
@@ -934,7 +951,7 @@ namespace
         }
 
         std::string error;
-        if (!LaunchProject(_state, *projectPath, error))
+        if (!LaunchProject(*projectPath, error))
         {
             SetMessage(_state, error.empty() ? "Launch failed." : error, true);
             return;
@@ -1064,11 +1081,7 @@ namespace
             OpenProject(_state, _state.openProjectPath, _running);
 
         ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextUnformatted("Engine");
-        ImGui::InputText("Executable", &_state.engineExecutable);
-        if (ImGui::Checkbox("Close after launch", &_state.closeAfterLaunch))
+        if (ImGui::Checkbox("Close CanisPack after launch", &_state.closeAfterLaunch))
             SaveConfig(_state);
 
         if (!_state.message.empty())
@@ -1132,8 +1145,6 @@ int main(int, char **)
     AppState state;
     state.projectLocation = GetDefaultProjectsDirectory().generic_string();
     LoadConfig(state);
-    if (const char *engineExecutable = std::getenv("CANIS_ENGINE_EXECUTABLE"))
-        state.engineExecutable = engineExecutable;
     if (const char *templateRepository = std::getenv("CANIS_TEMPLATE_REPOSITORY"))
         state.templateRepository = templateRepository;
     {
