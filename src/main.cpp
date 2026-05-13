@@ -173,15 +173,15 @@ namespace
     fs::path GetDefaultProjectsDirectory()
     {
         if (const char *home = std::getenv("HOME"))
-            return fs::path(home) / "CanisProjects";
+            return fs::path(home) / "Projects";
 
 #if defined(_WIN32)
         if (const char *profile = std::getenv("USERPROFILE"))
-            return fs::path(profile) / "CanisProjects";
+            return fs::path(profile) / "Projects";
 #endif
 
         std::error_code ec;
-        return fs::current_path(ec) / "CanisProjects";
+        return fs::current_path(ec) / "Projects";
     }
 
     bool IsDirectory(const fs::path &_path)
