@@ -11,9 +11,9 @@ Startup flow:
 1. CanisPack loads recent projects from `user_settings/canispack.conf`.
 2. A user creates or opens a project.
 3. For new projects, CanisPack fetches release tags from CanisTemplate.
-4. CanisPack clones the selected template tag into the new project folder.
+4. CanisPack clones the selected template tag with submodules into the new project folder.
 5. CanisPack launches `c-engine` as a background process.
-6. The selected project is passed with `CANIS_PROJECT=/path/to/project`.
+6. The selected Canis project folder is passed with `CANIS_PROJECT=/path/to/project`.
 7. The engine opens that project directly.
 
 The standalone app uses small direct submodules:
@@ -25,7 +25,7 @@ vendor/imgui/
 vendor/yaml-cpp/
 ```
 
-Starter project assets live in `git@github.com:EricWRogers/CanisTemplate.git`. CanisPack fetches that repository's tags so each new project can choose a template release.
+Starter workspaces live in `git@github.com:EricWRogers/CanisTemplate.git`. CanisPack fetches that repository's tags so each new project can choose a template release. After cloning, CanisPack creates a local `main` branch and removes the template `origin` remote from the new project's root repository.
 
 Useful environment variables:
 
@@ -55,4 +55,23 @@ project-name/
     project.canis
 ```
 
-New projects should include default assets and shaders so the editor can immediately create cubes, sprites, materials, and starter scenes.
+New template releases are full workspaces with the editable Canis project nested under `project/`:
+
+```text
+project-name/
+  canis/
+  cmake/
+  external/
+  game/
+  project/
+    assets/
+    project_settings/
+      project.canis
+  scripts/
+  .gitignore
+  .gitmodules
+  CMakeLists.txt
+  README.md
+```
+
+CanisPack accepts either the workspace root or the nested `project/` folder when opening an existing project.

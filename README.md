@@ -9,7 +9,7 @@ This repository builds a standalone launcher with CMake. It keeps dependencies s
 - Create a Canis project folder.
 - Open an existing Canis project.
 - Remember recent projects.
-- Clone a tagged CanisTemplate release for new projects.
+- Clone a tagged CanisTemplate release, including engine submodules, for new projects.
 - Choose the template release from the available Git tags.
 
 ## Setup
@@ -49,6 +49,8 @@ You can override that in the UI or with:
 ```bash
 CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git ./build/bin/CanisPack
 ```
+
+Created projects use the full CanisTemplate workspace shape. CanisPack keeps the new folder as a git project, removes the template `origin` remote, and launches the nested `project/` folder in the editor.
 
 ## Direction
 

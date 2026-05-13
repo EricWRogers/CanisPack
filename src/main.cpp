@@ -120,6 +120,14 @@ namespace
         return std::nullopt;
     }
 
+    std::string GetProjectDisplayName(const fs::path &_projectPath)
+    {
+        if (_projectPath.filename() == "project" && !_projectPath.parent_path().empty())
+            return _projectPath.parent_path().filename().string();
+
+        return _projectPath.filename().string();
+    }
+
     std::string TrimCopy(const std::string &_value)
     {
         std::size_t begin = 0u;
@@ -386,7 +394,8 @@ namespace
 
         const std::string command =
             "git clone --depth 1 --branch " + ShellQuote(release) +
-            " --single-branch -- " + ShellQuote(repository) + " " + ShellQuote(_projectPath.string());
+            " --single-branch --recurse-submodules --shallow-submodules -- " +
+            ShellQuote(repository) + " " + ShellQuote(_projectPath.string());
 
         const CommandResult result = RunCommandCapture(command);
         if (result.exitCode != 0)
@@ -397,10 +406,22 @@ namespace
             return false;
         }
 
-        fs::remove_all(_projectPath / ".git", ec);
-        if (ec)
+        const std::string gitDirectoryArgument = "-C " + ShellQuote(_projectPath.string());
+        const CommandResult branchResult = RunCommandCapture("git " + gitDirectoryArgument + " checkout -B main");
+        if (branchResult.exitCode != 0)
         {
-            _outError = "Template cloned, but its git metadata could not be removed.";
+            _outError = "Template cloned, but the new project branch could not be prepared.";
+            if (!branchResult.output.empty())
+                _outError += "\n" + branchResult.output;
+            return false;
+        }
+
+        const CommandResult remoteResult = RunCommandCapture("git " + gitDirectoryArgument + " remote remove origin");
+        if (remoteResult.exitCode != 0)
+        {
+            _outError = "Template cloned, but its template remote could not be removed.";
+            if (!remoteResult.output.empty())
+                _outError += "\n" + remoteResult.output;
             return false;
         }
 
@@ -429,14 +450,15 @@ namespace
             return false;
         }
 
-        if (!IsProjectDirectory(projectPath))
+        const std::optional<fs::path> normalizedProjectPath = NormalizeProjectPath(projectPath);
+        if (!normalizedProjectPath.has_value())
         {
-            _outError = "Template release did not contain a Canis project.";
+            _outError = "Template release did not contain a Canis project or project/ folder.";
             fs::remove_all(projectPath, ec);
             return false;
         }
 
-        _outProjectPath = WeaklyCanonicalPath(projectPath);
+        _outProjectPath = *normalizedProjectPath;
         return true;
     }
 
@@ -533,7 +555,7 @@ namespace
 
         AddRecentProject(_state, *projectPath);
         SaveConfig(_state);
-        SetMessage(_state, "Launched " + projectPath->filename().string(), false);
+        SetMessage(_state, "Launched " + GetProjectDisplayName(*projectPath), false);
         if (_state.closeAfterLaunch)
             _running = false;
     }
@@ -564,7 +586,7 @@ namespace
             if (!IsProjectDirectory(projectPath))
                 continue;
 
-            const std::string label = projectPath.filename().string() + "##" + projectPath.generic_string();
+            const std::string label = GetProjectDisplayName(projectPath) + "##" + projectPath.generic_string();
             if (ImGui::Selectable(label.c_str(), false))
                 OpenProject(_state, projectPath, _running);
 
