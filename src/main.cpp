@@ -16,10 +16,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -30,6 +33,24 @@
 namespace
 {
     namespace fs = std::filesystem;
+
+    struct CreateProjectTask
+    {
+        std::thread worker;
+        std::mutex mutex;
+        std::string step = "";
+        std::string log = "";
+        std::string error = "";
+        fs::path workspacePath = {};
+        fs::path projectPath = {};
+        fs::path editorExecutable = {};
+        float progress = 0.0f;
+        bool running = false;
+        bool completed = false;
+        bool succeeded = false;
+        bool launchAttempted = false;
+        bool popupOpen = false;
+    };
 
     struct AppState
     {
@@ -44,6 +65,15 @@ namespace
         std::string message = "";
         bool messageIsError = false;
         bool closeAfterLaunch = false;
+        CreateProjectTask createTask = {};
+    };
+
+    struct ProjectCreateSettings
+    {
+        std::string projectName = "";
+        std::string projectLocation = "";
+        std::string templateRepository = "";
+        std::string selectedTemplateTag = "";
     };
 
     struct CommandResult
@@ -227,6 +257,44 @@ namespace
         return result;
     }
 
+    CommandResult RunCommandStream(const std::string &_command, const std::function<void(const std::string&)> &_onOutput)
+    {
+        CommandResult result;
+        const std::string command = _command + " 2>&1";
+
+#if defined(_WIN32)
+        FILE *pipe = _popen(command.c_str(), "r");
+#else
+        FILE *pipe = popen(command.c_str(), "r");
+#endif
+
+        if (pipe == nullptr)
+        {
+            result.output = "Could not start command.";
+            if (_onOutput)
+                _onOutput(result.output + "\n");
+            return result;
+        }
+
+        std::array<char, 4096> buffer = {};
+        while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+        {
+            const std::string chunk = buffer.data();
+            result.output += chunk;
+            if (_onOutput)
+                _onOutput(chunk);
+        }
+
+#if defined(_WIN32)
+        result.exitCode = _pclose(pipe);
+#else
+        const int status = pclose(pipe);
+        result.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : status;
+#endif
+
+        return result;
+    }
+
     std::vector<std::string> ParseTagList(const std::string &_gitOutput)
     {
         std::vector<std::string> tags;
@@ -368,10 +436,69 @@ namespace
             out << root;
     }
 
-    bool CloneTemplateProject(const AppState &_state, const fs::path &_projectPath, std::string &_outError)
+    void SetCreateTaskStep(CreateProjectTask &_task, std::string _step, float _progress)
     {
-        const std::string repository = TrimCopy(_state.templateRepository);
-        const std::string release = TrimCopy(_state.selectedTemplateTag);
+        std::lock_guard<std::mutex> lock(_task.mutex);
+        _task.step = std::move(_step);
+        _task.progress = _progress;
+    }
+
+    void AppendCreateTaskLog(CreateProjectTask &_task, const std::string &_chunk)
+    {
+        std::lock_guard<std::mutex> lock(_task.mutex);
+        _task.log += _chunk;
+
+        constexpr std::size_t maxLogSize = 80000u;
+        if (_task.log.size() > maxLogSize)
+            _task.log.erase(0u, _task.log.size() - maxLogSize);
+    }
+
+    void CompleteCreateTask(
+        CreateProjectTask &_task,
+        bool _succeeded,
+        std::string _error,
+        fs::path _workspacePath,
+        fs::path _projectPath,
+        fs::path _editorExecutable)
+    {
+        std::lock_guard<std::mutex> lock(_task.mutex);
+        _task.running = false;
+        _task.completed = true;
+        _task.succeeded = _succeeded;
+        _task.error = std::move(_error);
+        _task.workspacePath = std::move(_workspacePath);
+        _task.projectPath = std::move(_projectPath);
+        _task.editorExecutable = std::move(_editorExecutable);
+        _task.progress = _succeeded ? 1.0f : 0.0f;
+        _task.step = _succeeded ? "Build finished. Launching editor..." : "Create project failed.";
+    }
+
+    CommandResult RunCreateTaskCommand(CreateProjectTask &_task, const std::string &_command)
+    {
+        AppendCreateTaskLog(_task, "\n> " + _command + "\n");
+        return RunCommandStream(_command, [&](const std::string &_chunk)
+        {
+            AppendCreateTaskLog(_task, _chunk);
+        });
+    }
+
+    fs::path GetBuiltEditorExecutable(const fs::path &_workspacePath)
+    {
+#if defined(_WIN32)
+        return _workspacePath / "project" / "c-engine.exe";
+#else
+        return _workspacePath / "project" / "c-engine";
+#endif
+    }
+
+    bool CloneTemplateProject(
+        const ProjectCreateSettings &_settings,
+        const fs::path &_projectPath,
+        CreateProjectTask &_task,
+        std::string &_outError)
+    {
+        const std::string repository = TrimCopy(_settings.templateRepository);
+        const std::string release = TrimCopy(_settings.selectedTemplateTag);
         if (repository.empty())
         {
             _outError = "Template repository is empty.";
@@ -397,7 +524,7 @@ namespace
             " --single-branch --recurse-submodules --shallow-submodules -- " +
             ShellQuote(repository) + " " + ShellQuote(_projectPath.string());
 
-        const CommandResult result = RunCommandCapture(command);
+        const CommandResult result = RunCreateTaskCommand(_task, command);
         if (result.exitCode != 0)
         {
             _outError = "Could not clone template release.";
@@ -407,7 +534,7 @@ namespace
         }
 
         const std::string gitDirectoryArgument = "-C " + ShellQuote(_projectPath.string());
-        const CommandResult branchResult = RunCommandCapture("git " + gitDirectoryArgument + " checkout -B main");
+        const CommandResult branchResult = RunCreateTaskCommand(_task, "git " + gitDirectoryArgument + " checkout -B main");
         if (branchResult.exitCode != 0)
         {
             _outError = "Template cloned, but the new project branch could not be prepared.";
@@ -416,7 +543,7 @@ namespace
             return false;
         }
 
-        const CommandResult remoteResult = RunCommandCapture("git " + gitDirectoryArgument + " remote remove origin");
+        const CommandResult remoteResult = RunCreateTaskCommand(_task, "git " + gitDirectoryArgument + " remote remove origin");
         if (remoteResult.exitCode != 0)
         {
             _outError = "Template cloned, but its template remote could not be removed.";
@@ -428,9 +555,14 @@ namespace
         return true;
     }
 
-    bool CreateProject(const AppState &_state, fs::path &_outProjectPath, std::string &_outError)
+    bool CreateProject(
+        const ProjectCreateSettings &_settings,
+        CreateProjectTask &_task,
+        fs::path &_outWorkspacePath,
+        fs::path &_outProjectPath,
+        std::string &_outError)
     {
-        const fs::path projectPath = WeaklyCanonicalPath(fs::path(_state.projectLocation)) / SanitizeProjectFolderName(_state.projectName);
+        const fs::path projectPath = WeaklyCanonicalPath(fs::path(_settings.projectLocation)) / SanitizeProjectFolderName(_settings.projectName);
         std::error_code ec;
         if (fs::exists(projectPath, ec) && !fs::is_directory(projectPath, ec))
         {
@@ -444,7 +576,8 @@ namespace
             return false;
         }
 
-        if (!CloneTemplateProject(_state, projectPath, _outError))
+        SetCreateTaskStep(_task, "Cloning template release...", 0.25f);
+        if (!CloneTemplateProject(_settings, projectPath, _task, _outError))
         {
             fs::remove_all(projectPath, ec);
             return false;
@@ -458,13 +591,14 @@ namespace
             return false;
         }
 
+        _outWorkspacePath = WeaklyCanonicalPath(projectPath);
         _outProjectPath = *normalizedProjectPath;
         return true;
     }
 
-    bool LaunchProject(const AppState &_state, const fs::path &_projectPath, std::string &_outError)
+    bool LaunchProjectWithExecutable(const fs::path &_executablePath, const fs::path &_projectPath, std::string &_outError)
     {
-        const fs::path executablePath = WeaklyCanonicalPath(_state.engineExecutable);
+        const fs::path executablePath = WeaklyCanonicalPath(_executablePath);
         if (!IsFile(executablePath))
         {
             _outError = "Engine executable not found: " + executablePath.generic_string();
@@ -537,6 +671,259 @@ namespace
         return true;
     }
 
+    bool LaunchProject(const AppState &_state, const fs::path &_projectPath, std::string &_outError)
+    {
+        return LaunchProjectWithExecutable(_state.engineExecutable, _projectPath, _outError);
+    }
+
+    bool BuildProjectWorkspace(const fs::path &_workspacePath, CreateProjectTask &_task, std::string &_outError)
+    {
+        const fs::path buildPath = _workspacePath / "build";
+
+        SetCreateTaskStep(_task, "Configuring project build...", 0.50f);
+        const std::string configureCommand =
+            "cmake -S " + ShellQuote(_workspacePath.string()) + " -B " + ShellQuote(buildPath.string());
+
+        const CommandResult configureResult = RunCreateTaskCommand(_task, configureCommand);
+        if (configureResult.exitCode != 0)
+        {
+            _outError = "Could not configure the new project build.";
+            if (!configureResult.output.empty())
+                _outError += "\n" + configureResult.output;
+            return false;
+        }
+
+        SetCreateTaskStep(_task, "Building editor...", 0.75f);
+        const std::string buildCommand = "cmake --build " + ShellQuote(buildPath.string()) + " --parallel";
+        const CommandResult buildResult = RunCreateTaskCommand(_task, buildCommand);
+        if (buildResult.exitCode != 0)
+        {
+            _outError = "Could not build the new project.";
+            if (!buildResult.output.empty())
+                _outError += "\n" + buildResult.output;
+            return false;
+        }
+
+        const fs::path editorExecutable = GetBuiltEditorExecutable(_workspacePath);
+        if (!IsFile(editorExecutable))
+        {
+            _outError = "Build finished, but the editor executable was not found: " + editorExecutable.generic_string();
+            return false;
+        }
+
+        return true;
+    }
+
+    bool IsCreateTaskRunning(CreateProjectTask &_task)
+    {
+        std::lock_guard<std::mutex> lock(_task.mutex);
+        return _task.running;
+    }
+
+    bool IsCreateTaskCompleted(CreateProjectTask &_task)
+    {
+        std::lock_guard<std::mutex> lock(_task.mutex);
+        return _task.completed;
+    }
+
+    void JoinCompletedCreateTask(CreateProjectTask &_task)
+    {
+        if (_task.worker.joinable() && IsCreateTaskCompleted(_task))
+            _task.worker.join();
+    }
+
+    void StartCreateProjectTask(AppState &_state)
+    {
+        JoinCompletedCreateTask(_state.createTask);
+
+        if (_state.createTask.worker.joinable())
+        {
+            SetMessage(_state, "A project is already being created.", true);
+            return;
+        }
+
+        const ProjectCreateSettings settings =
+        {
+            _state.projectName,
+            _state.projectLocation,
+            _state.templateRepository,
+            _state.selectedTemplateTag
+        };
+
+        {
+            std::lock_guard<std::mutex> lock(_state.createTask.mutex);
+            _state.createTask.step = "Preparing project...";
+            _state.createTask.log.clear();
+            _state.createTask.error.clear();
+            _state.createTask.workspacePath.clear();
+            _state.createTask.projectPath.clear();
+            _state.createTask.editorExecutable.clear();
+            _state.createTask.progress = 0.05f;
+            _state.createTask.running = true;
+            _state.createTask.completed = false;
+            _state.createTask.succeeded = false;
+            _state.createTask.launchAttempted = false;
+            _state.createTask.popupOpen = true;
+        }
+
+        CreateProjectTask *task = &_state.createTask;
+        task->worker = std::thread([settings, task]()
+        {
+            fs::path workspacePath;
+            fs::path projectPath;
+            std::string error;
+
+            if (!CreateProject(settings, *task, workspacePath, projectPath, error))
+            {
+                CompleteCreateTask(*task, false, error.empty() ? "Could not create project." : error, workspacePath, projectPath, {});
+                return;
+            }
+
+            if (!BuildProjectWorkspace(workspacePath, *task, error))
+            {
+                CompleteCreateTask(*task, false, error.empty() ? "Could not build project." : error, workspacePath, projectPath, {});
+                return;
+            }
+
+            CompleteCreateTask(*task, true, "", workspacePath, projectPath, GetBuiltEditorExecutable(workspacePath));
+        });
+    }
+
+    void ProcessCreateTaskResult(AppState &_state, bool &_running)
+    {
+        fs::path projectPath;
+        fs::path editorExecutable;
+        bool shouldLaunch = false;
+
+        {
+            std::lock_guard<std::mutex> lock(_state.createTask.mutex);
+            shouldLaunch = _state.createTask.completed && _state.createTask.succeeded && !_state.createTask.launchAttempted;
+            if (shouldLaunch)
+            {
+                _state.createTask.launchAttempted = true;
+                projectPath = _state.createTask.projectPath;
+                editorExecutable = _state.createTask.editorExecutable;
+            }
+        }
+
+        if (!shouldLaunch)
+            return;
+
+        JoinCompletedCreateTask(_state.createTask);
+
+        std::string error;
+        if (!LaunchProjectWithExecutable(editorExecutable, projectPath, error))
+        {
+            {
+                std::lock_guard<std::mutex> lock(_state.createTask.mutex);
+                _state.createTask.succeeded = false;
+                _state.createTask.error = error.empty() ? "Launch failed." : error;
+                _state.createTask.step = "Launch failed.";
+                _state.createTask.popupOpen = true;
+            }
+
+            SetMessage(_state, error.empty() ? "Launch failed." : error, true);
+            return;
+        }
+
+        AddRecentProject(_state, projectPath);
+        SaveConfig(_state);
+        SetMessage(_state, "Created and launched " + GetProjectDisplayName(projectPath), false);
+
+        {
+            std::lock_guard<std::mutex> lock(_state.createTask.mutex);
+            _state.createTask.step = "Editor launched.";
+            _state.createTask.popupOpen = false;
+        }
+
+        if (_state.closeAfterLaunch)
+            _running = false;
+    }
+
+    void DrawCreateProjectPopup(AppState &_state)
+    {
+        std::string step;
+        std::string log;
+        std::string error;
+        float progress = 0.0f;
+        bool running = false;
+        bool completed = false;
+        bool succeeded = false;
+        bool launchAttempted = false;
+        bool popupOpen = false;
+
+        {
+            std::lock_guard<std::mutex> lock(_state.createTask.mutex);
+            step = _state.createTask.step;
+            log = _state.createTask.log;
+            error = _state.createTask.error;
+            progress = _state.createTask.progress;
+            running = _state.createTask.running;
+            completed = _state.createTask.completed;
+            succeeded = _state.createTask.succeeded;
+            launchAttempted = _state.createTask.launchAttempted;
+            popupOpen = _state.createTask.popupOpen;
+        }
+
+        const bool shouldOpen = popupOpen || running || (completed && succeeded && !launchAttempted);
+        if (shouldOpen)
+            ImGui::OpenPopup("Create Project");
+
+        if (!ImGui::BeginPopupModal("Create Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+
+        if (!shouldOpen && completed && succeeded && launchAttempted)
+        {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+
+        ImGui::TextUnformatted(step.empty() ? "Preparing project..." : step.c_str());
+        ImGui::ProgressBar(std::clamp(progress, 0.0f, 1.0f), ImVec2(560.0f, 0.0f));
+
+        ImGui::Spacing();
+        ImGui::BeginChild("CreateProjectLog", ImVec2(620.0f, 260.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+        if (log.empty())
+            ImGui::TextDisabled("Waiting for command output...");
+        else
+            ImGui::TextUnformatted(log.c_str());
+        if (running)
+            ImGui::SetScrollHereY(1.0f);
+        ImGui::EndChild();
+
+        if (!error.empty())
+        {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 0.36f, 0.30f, 1.0f), "%s", error.c_str());
+        }
+
+        ImGui::Spacing();
+        if (running)
+        {
+            ImGui::TextDisabled("Working...");
+        }
+        else if (!succeeded)
+        {
+            if (ImGui::Button("Close", ImVec2(110.0f, 30.0f)))
+            {
+                {
+                    std::lock_guard<std::mutex> lock(_state.createTask.mutex);
+                    _state.createTask.popupOpen = false;
+                }
+
+                JoinCompletedCreateTask(_state.createTask);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled("Launching editor...");
+        }
+
+        ImGui::EndPopup();
+    }
+
     void OpenProject(AppState &_state, const fs::path &_path, bool &_running)
     {
         std::optional<fs::path> projectPath = NormalizeProjectPath(_path);
@@ -562,6 +949,8 @@ namespace
 
     void DrawCanisPack(AppState &_state, bool &_running)
     {
+        ProcessCreateTaskResult(_state, _running);
+
         ImGuiIO &io = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
         ImGui::SetNextWindowSize(io.DisplaySize);
@@ -654,15 +1043,17 @@ namespace
         }
 
         ImGui::Spacing();
+        const bool createBusy = IsCreateTaskRunning(_state.createTask);
+        if (createBusy)
+            ImGui::BeginDisabled();
+
         if (ImGui::Button("Create and Open", ImVec2(160.0f, 34.0f)))
         {
-            fs::path projectPath;
-            std::string error;
-            if (CreateProject(_state, projectPath, error))
-                OpenProject(_state, projectPath, _running);
-            else
-                SetMessage(_state, error.empty() ? "Could not create project." : error, true);
+            StartCreateProjectTask(_state);
         }
+
+        if (createBusy)
+            ImGui::EndDisabled();
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -689,6 +1080,8 @@ namespace
 
         ImGui::EndChild();
         ImGui::End();
+
+        DrawCreateProjectPopup(_state);
     }
 }
 
@@ -779,6 +1172,9 @@ int main(int, char **)
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
     }
+
+    if (state.createTask.worker.joinable())
+        state.createTask.worker.join();
 
     SaveConfig(state);
 

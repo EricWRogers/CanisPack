@@ -12,9 +12,10 @@ Startup flow:
 2. A user creates or opens a project.
 3. For new projects, CanisPack fetches release tags from CanisTemplate.
 4. CanisPack clones the selected template tag with submodules into the new project folder.
-5. CanisPack launches `c-engine` as a background process.
-6. The selected Canis project folder is passed with `CANIS_PROJECT=/path/to/project`.
-7. The engine opens that project directly.
+5. CanisPack configures and builds the new workspace.
+6. CanisPack launches the new workspace's `project/c-engine` as a background process.
+7. The selected Canis project folder is passed with `CANIS_PROJECT=/path/to/project`.
+8. The engine opens that project directly.
 
 The standalone app uses small direct submodules:
 
@@ -25,7 +26,7 @@ vendor/imgui/
 vendor/yaml-cpp/
 ```
 
-Starter workspaces live in `git@github.com:EricWRogers/CanisTemplate.git`. CanisPack fetches that repository's tags so each new project can choose a template release. After cloning, CanisPack creates a local `main` branch and removes the template `origin` remote from the new project's root repository.
+Starter workspaces live in `git@github.com:EricWRogers/CanisTemplate.git`. CanisPack fetches that repository's tags so each new project can choose a template release. After cloning, CanisPack creates a local `main` branch, removes the template `origin` remote from the new project's root repository, and runs CMake configure/build before launching the editor.
 
 Useful environment variables:
 
