@@ -102,6 +102,25 @@ namespace
         return GetExecutableBasePath() / "user_settings" / "canispack.conf";
     }
 
+    fs::path GetAssetPath(const fs::path &_assetPath)
+    {
+        return GetExecutableBasePath() / "assets" / _assetPath;
+    }
+
+    void SetCanisPackWindowIcon(SDL_Window *_window)
+    {
+        const fs::path iconPath = GetAssetPath("canispack_icon.bmp");
+        SDL_Surface *icon = SDL_LoadBMP(iconPath.string().c_str());
+        if (icon == nullptr)
+        {
+            SDL_Log("Failed to load CanisPack icon '%s': %s", iconPath.string().c_str(), SDL_GetError());
+            return;
+        }
+
+        SDL_SetWindowIcon(_window, icon);
+        SDL_DestroySurface(icon);
+    }
+
     fs::path GetDefaultProjectsDirectory()
     {
         if (const char *home = std::getenv("HOME"))
@@ -1120,6 +1139,8 @@ int main(int, char **)
         SDL_Quit();
         return 1;
     }
+
+    SetCanisPackWindowIcon(window);
 
     SDL_GLContext glContext = SDL_GL_CreateContext(window);
     if (glContext == nullptr)
