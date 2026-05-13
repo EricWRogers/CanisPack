@@ -96,3 +96,7 @@ install(FILES "${CANISPACK_ASSET_DIR}/canispack_icon.png"
 install(FILES "packaging/linux/canispack.desktop"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
 )
+
+install(FILES "LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/canispack"
+)
