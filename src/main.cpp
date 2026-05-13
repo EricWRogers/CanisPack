@@ -170,6 +170,19 @@ namespace
         SDL_DestroySurface(icon);
     }
 
+    void SetCanisPackDefaultFont(ImGuiIO &_io)
+    {
+        const fs::path fontPath = GetAssetPath("fonts/CascadiaMono/CaskaydiaMonoNerdFont-Regular.ttf");
+        ImFont *font = _io.Fonts->AddFontFromFileTTF(fontPath.string().c_str(), 15.0f);
+        if (font == nullptr)
+        {
+            SDL_Log("Failed to load CanisPack font '%s'", fontPath.string().c_str());
+            return;
+        }
+
+        _io.FontDefault = font;
+    }
+
     fs::path GetDefaultProjectsDirectory()
     {
         if (const char *home = std::getenv("HOME"))
@@ -1363,6 +1376,7 @@ int main(int, char **)
     ImGui::StyleColorsDark();
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    SetCanisPackDefaultFont(io);
 
     ImGui_ImplSDL3_InitForOpenGL(window, glContext);
     ImGui_ImplOpenGL3_Init("#version 330 core");
