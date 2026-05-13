@@ -47,16 +47,22 @@ CanisPack stores user settings in:
 ~/.config/canispack/canispack.conf
 ```
 
-New projects are cloned from:
+New projects are cloned from CanisTemplate. The Create Project panel can switch between SSH:
 
 ```text
 git@github.com:EricWRogers/CanisTemplate.git
 ```
 
-You can override that in the UI or with:
+and HTTPS:
+
+```text
+https://github.com/EricWRogers/CanisTemplate.git
+```
+
+You can override the repository and clone protocol in the UI or with:
 
 ```bash
-CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git ./build/bin/CanisPack
+CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git CANIS_TEMPLATE_CLONE_PROTOCOL=ssh ./build/bin/CanisPack
 ```
 
 Created projects use the full CanisTemplate workspace shape. CanisPack keeps the new folder as a git project, removes the template `origin` remote, builds the workspace, and launches the nested `project/` folder with the new workspace's editor executable.

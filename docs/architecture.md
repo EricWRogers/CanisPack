@@ -26,12 +26,13 @@ vendor/imgui/
 vendor/yaml-cpp/
 ```
 
-Starter workspaces live in `git@github.com:EricWRogers/CanisTemplate.git`. CanisPack fetches that repository's tags so each new project can choose a template release. After cloning, CanisPack creates a local `main` branch, removes the template `origin` remote from the new project's root repository, and runs CMake configure/build before launching the editor.
+Starter workspaces live in `git@github.com:EricWRogers/CanisTemplate.git` or `https://github.com/EricWRogers/CanisTemplate.git`, depending on the selected clone protocol. CanisPack fetches that repository's tags so each new project can choose a template release. After cloning, CanisPack creates a local `main` branch, removes the template `origin` remote from the new project's root repository, and runs CMake configure/build before launching the editor.
 
 Useful environment variables:
 
 - `CANIS_PROJECT=/path/to/project` opens a project directly.
 - `CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git` overrides the default template repository.
+- `CANIS_TEMPLATE_CLONE_PROTOCOL=ssh` or `https` chooses the template clone URL style.
 
 ## Later
 

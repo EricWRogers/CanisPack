@@ -59,6 +59,12 @@ namespace
         OpenExistingProject
     };
 
+    enum class CloneProtocol
+    {
+        SSH,
+        HTTPS
+    };
+
     struct FolderDialogState
     {
         std::mutex mutex;
@@ -78,6 +84,7 @@ namespace
         std::string projectLocation = "";
         std::string openProjectPath = "";
         std::string templateRepository = CANISPACK_TEMPLATE_REPOSITORY;
+        CloneProtocol templateCloneProtocol = CloneProtocol::SSH;
         std::vector<std::string> templateTags = {};
         std::string selectedTemplateTag = "";
         std::string message = "";
@@ -249,6 +256,102 @@ namespace
             --end;
 
         return _value.substr(begin, end - begin);
+    }
+
+    std::optional<std::string> ExtractGitHubRepositorySlug(const std::string &_repository)
+    {
+        std::string repository = TrimCopy(_repository);
+        std::string slug;
+
+        constexpr const char *sshPrefix = "git@github.com:";
+        constexpr const char *sshUrlPrefix = "ssh://git@github.com/";
+        constexpr const char *httpsPrefix = "https://github.com/";
+        constexpr const char *httpPrefix = "http://github.com/";
+
+        if (repository.starts_with(sshPrefix))
+            slug = repository.substr(std::char_traits<char>::length(sshPrefix));
+        else if (repository.starts_with(sshUrlPrefix))
+            slug = repository.substr(std::char_traits<char>::length(sshUrlPrefix));
+        else if (repository.starts_with(httpsPrefix))
+            slug = repository.substr(std::char_traits<char>::length(httpsPrefix));
+        else if (repository.starts_with(httpPrefix))
+            slug = repository.substr(std::char_traits<char>::length(httpPrefix));
+        else
+            return std::nullopt;
+
+        while (!slug.empty() && slug.front() == '/')
+            slug.erase(slug.begin());
+        while (!slug.empty() && slug.back() == '/')
+            slug.pop_back();
+
+        if (slug.empty() || slug.find('/') == std::string::npos)
+            return std::nullopt;
+
+        if (!slug.ends_with(".git"))
+            slug += ".git";
+
+        return slug;
+    }
+
+    std::optional<std::string> ConvertGitHubRepositoryProtocol(const std::string &_repository, CloneProtocol _protocol)
+    {
+        const std::optional<std::string> slug = ExtractGitHubRepositorySlug(_repository);
+        if (!slug.has_value())
+            return std::nullopt;
+
+        if (_protocol == CloneProtocol::HTTPS)
+            return "https://github.com/" + *slug;
+
+        return "git@github.com:" + *slug;
+    }
+
+    CloneProtocol InferCloneProtocol(const std::string &_repository)
+    {
+        const std::string repository = TrimCopy(_repository);
+        if (repository.starts_with("https://") || repository.starts_with("http://"))
+            return CloneProtocol::HTTPS;
+
+        return CloneProtocol::SSH;
+    }
+
+    const char *CloneProtocolToConfigString(CloneProtocol _protocol)
+    {
+        return (_protocol == CloneProtocol::HTTPS) ? "https" : "ssh";
+    }
+
+    CloneProtocol CloneProtocolFromConfigString(const std::string &_value, CloneProtocol _fallback)
+    {
+        std::string normalized = TrimCopy(_value);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c)
+        {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        if (normalized == "https" || normalized == "http")
+            return CloneProtocol::HTTPS;
+        if (normalized == "ssh")
+            return CloneProtocol::SSH;
+
+        return _fallback;
+    }
+
+    std::string GetDefaultTemplateRepository(CloneProtocol _protocol)
+    {
+        if (std::optional<std::string> converted = ConvertGitHubRepositoryProtocol(CANISPACK_TEMPLATE_REPOSITORY, _protocol))
+            return *converted;
+
+        return (_protocol == CloneProtocol::HTTPS) ?
+            "https://github.com/EricWRogers/CanisTemplate.git" :
+            "git@github.com:EricWRogers/CanisTemplate.git";
+    }
+
+    bool SetTemplateCloneProtocol(AppState &_state, CloneProtocol _protocol)
+    {
+        const bool converted = ConvertGitHubRepositoryProtocol(_state.templateRepository, _protocol).has_value();
+        _state.templateRepository = ConvertGitHubRepositoryProtocol(_state.templateRepository, _protocol)
+            .value_or(GetDefaultTemplateRepository(_protocol));
+        _state.templateCloneProtocol = _protocol;
+        return converted;
     }
 
     std::string GetFolderDialogDefaultLocation(const std::string &_location)
@@ -558,6 +661,16 @@ namespace
         {
             const YAML::Node root = YAML::LoadFile(configPath.string());
             _state.templateRepository = root["templateRepository"].as<std::string>(_state.templateRepository);
+            _state.templateCloneProtocol = InferCloneProtocol(_state.templateRepository);
+            if (const YAML::Node cloneProtocol = root["templateCloneProtocol"])
+            {
+                _state.templateCloneProtocol = CloneProtocolFromConfigString(
+                    cloneProtocol.as<std::string>(""),
+                    _state.templateCloneProtocol);
+
+                if (std::optional<std::string> converted = ConvertGitHubRepositoryProtocol(_state.templateRepository, _state.templateCloneProtocol))
+                    _state.templateRepository = *converted;
+            }
             _state.selectedTemplateTag = root["templateRelease"].as<std::string>(_state.selectedTemplateTag);
             _state.closeAfterLaunch = root["closeAfterLaunch"].as<bool>(_state.closeAfterLaunch);
 
@@ -579,6 +692,7 @@ namespace
     {
         YAML::Node root;
         root["templateRepository"] = _state.templateRepository;
+        root["templateCloneProtocol"] = CloneProtocolToConfigString(_state.templateCloneProtocol);
         root["templateRelease"] = _state.selectedTemplateTag;
         root["closeAfterLaunch"] = _state.closeAfterLaunch;
 
@@ -1238,8 +1352,35 @@ namespace
 
         ImGui::Spacing();
         ImGui::TextUnformatted("Template");
+        ImGui::TextUnformatted("Clone with");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("SSH", _state.templateCloneProtocol == CloneProtocol::SSH))
+        {
+            const bool converted = SetTemplateCloneProtocol(_state, CloneProtocol::SSH);
+            if (!converted)
+            {
+                _state.templateTags.clear();
+                _state.selectedTemplateTag.clear();
+                SetMessage(_state, "Repository was reset to the default SSH template URL.", false);
+            }
+            SaveConfig(_state);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("HTTPS", _state.templateCloneProtocol == CloneProtocol::HTTPS))
+        {
+            const bool converted = SetTemplateCloneProtocol(_state, CloneProtocol::HTTPS);
+            if (!converted)
+            {
+                _state.templateTags.clear();
+                _state.selectedTemplateTag.clear();
+                SetMessage(_state, "Repository was reset to the default HTTPS template URL.", false);
+            }
+            SaveConfig(_state);
+        }
+
         if (ImGui::InputText("Repository", &_state.templateRepository))
         {
+            _state.templateCloneProtocol = InferCloneProtocol(_state.templateRepository);
             _state.templateTags.clear();
             _state.selectedTemplateTag.clear();
             SaveConfig(_state);
@@ -1383,9 +1524,18 @@ int main(int, char **)
 
     AppState state;
     state.projectLocation = GetDefaultProjectsDirectory().generic_string();
+    state.templateCloneProtocol = InferCloneProtocol(state.templateRepository);
     LoadConfig(state);
     if (const char *templateRepository = std::getenv("CANIS_TEMPLATE_REPOSITORY"))
+    {
         state.templateRepository = templateRepository;
+        state.templateCloneProtocol = InferCloneProtocol(state.templateRepository);
+    }
+    if (const char *templateCloneProtocol = std::getenv("CANIS_TEMPLATE_CLONE_PROTOCOL"))
+    {
+        state.templateCloneProtocol = CloneProtocolFromConfigString(templateCloneProtocol, state.templateCloneProtocol);
+        (void)SetTemplateCloneProtocol(state, state.templateCloneProtocol);
+    }
     {
         std::string error;
         if (!RefreshTemplateTags(state, error))
