@@ -1,6 +1,6 @@
 # CanisPack
 
-CanisPack is the project launcher for Canis, inspired by Unity Hub and Godot's project manager.
+CanisPack is the project launcher for Canis.
 
 This repository builds a standalone launcher with CMake. It keeps dependencies small: `vendor/canis` for the engine source reference, plus SDL, ImGui, and yaml-cpp as direct submodules.
 
@@ -12,6 +12,7 @@ This repository builds a standalone launcher with CMake. It keeps dependencies s
 - Clone a tagged CanisTemplate release, including engine submodules, for new projects.
 - Show clone/build progress while creating projects.
 - Build newly created projects before launching their editor.
+- Build existing full workspaces before launching when their editor executable is missing.
 - Launch projects using the editor executable built inside each project workspace.
 - Choose the template release from the available Git tags.
 
@@ -66,6 +67,8 @@ CANIS_TEMPLATE_REPOSITORY=git@github.com:EricWRogers/CanisTemplate.git CANIS_TEM
 ```
 
 Created projects use the full CanisTemplate workspace shape. CanisPack keeps the new folder as a git project, removes the template `origin` remote, builds the workspace, and launches the nested `project/` folder with the new workspace's editor executable.
+
+When opening an existing full workspace, CanisPack accepts either the workspace root or the nested `project/` folder. If the workspace's editor executable is missing, CanisPack configures and builds the workspace before launching.
 
 ## Direction
 

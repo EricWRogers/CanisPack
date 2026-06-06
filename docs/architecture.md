@@ -12,8 +12,8 @@ Startup flow:
 2. A user creates or opens a project.
 3. For new projects, CanisPack fetches release tags from CanisTemplate.
 4. CanisPack clones the selected template tag with submodules into the new project folder.
-5. CanisPack configures and builds the new workspace.
-6. CanisPack launches the new workspace's `project/c-engine` as a background process.
+5. CanisPack configures and builds a new workspace, or an existing workspace whose editor executable is missing.
+6. CanisPack launches the workspace's `project/c-engine` as a background process.
 7. The selected Canis project folder is passed with `CANIS_PROJECT=/path/to/project`.
 8. The engine opens that project directly.
 
@@ -74,4 +74,4 @@ project-name/
   README.md
 ```
 
-CanisPack accepts either the workspace root or the nested `project/` folder when opening an existing project.
+CanisPack accepts either the workspace root or the nested `project/` folder when opening an existing project. If `project/c-engine` is missing and the parent workspace has `CMakeLists.txt`, CanisPack configures and builds that workspace before launching.
