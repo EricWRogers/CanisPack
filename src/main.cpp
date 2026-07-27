@@ -197,6 +197,88 @@ namespace
         _io.FontDefault = font;
     }
 
+    void ApplyCanisPackTheme()
+    {
+        ImGuiStyle &style = ImGui::GetStyle();
+        style = ImGuiStyle();
+        ImGui::StyleColorsDark(&style);
+
+        style.WindowPadding = ImVec2(18.0f, 16.0f);
+        style.FramePadding = ImVec2(10.0f, 7.0f);
+        style.CellPadding = ImVec2(8.0f, 6.0f);
+        style.ItemSpacing = ImVec2(8.0f, 8.0f);
+        style.ItemInnerSpacing = ImVec2(7.0f, 6.0f);
+        style.IndentSpacing = 20.0f;
+        style.ScrollbarSize = 13.0f;
+        style.GrabMinSize = 10.0f;
+        style.WindowRounding = 5.0f;
+        style.ChildRounding = 5.0f;
+        style.FrameRounding = 4.0f;
+        style.PopupRounding = 5.0f;
+        style.ScrollbarRounding = 6.0f;
+        style.GrabRounding = 4.0f;
+        style.TabRounding = 4.0f;
+        style.WindowBorderSize = 1.0f;
+        style.ChildBorderSize = 1.0f;
+        style.PopupBorderSize = 1.0f;
+        style.FrameBorderSize = 0.0f;
+
+        ImVec4 *colors = style.Colors;
+        colors[ImGuiCol_Text]                 = ImVec4(0.86f, 0.89f, 0.93f, 1.00f);
+        colors[ImGuiCol_TextDisabled]         = ImVec4(0.48f, 0.52f, 0.58f, 1.00f);
+        colors[ImGuiCol_WindowBg]             = ImVec4(0.075f, 0.085f, 0.105f, 1.00f);
+        colors[ImGuiCol_ChildBg]              = ImVec4(0.105f, 0.118f, 0.145f, 1.00f);
+        colors[ImGuiCol_PopupBg]              = ImVec4(0.095f, 0.106f, 0.130f, 0.99f);
+        colors[ImGuiCol_Border]               = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
+        colors[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        colors[ImGuiCol_FrameBg]              = ImVec4(0.145f, 0.162f, 0.195f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.19f, 0.24f, 0.30f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.22f, 0.31f, 0.40f, 1.00f);
+        colors[ImGuiCol_TitleBg]              = ImVec4(0.085f, 0.095f, 0.118f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.115f, 0.132f, 0.162f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.075f, 0.085f, 0.105f, 0.75f);
+        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.25f, 0.28f, 0.34f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.32f, 0.36f, 0.43f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.38f, 0.44f, 0.52f, 1.00f);
+        colors[ImGuiCol_CheckMark]            = ImVec4(0.29f, 0.55f, 0.78f, 1.00f);
+        colors[ImGuiCol_SliderGrab]           = ImVec4(0.29f, 0.55f, 0.78f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.38f, 0.66f, 0.90f, 1.00f);
+        colors[ImGuiCol_Button]               = ImVec4(0.16f, 0.18f, 0.22f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.24f, 0.34f, 0.43f, 1.00f);
+        colors[ImGuiCol_ButtonActive]         = ImVec4(0.29f, 0.55f, 0.78f, 1.00f);
+        colors[ImGuiCol_Header]               = ImVec4(0.18f, 0.25f, 0.32f, 1.00f);
+        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.24f, 0.36f, 0.46f, 1.00f);
+        colors[ImGuiCol_HeaderActive]         = ImVec4(0.29f, 0.55f, 0.78f, 1.00f);
+        colors[ImGuiCol_Separator]            = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
+        colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.29f, 0.55f, 0.78f, 0.78f);
+        colors[ImGuiCol_SeparatorActive]      = ImVec4(0.38f, 0.66f, 0.90f, 1.00f);
+        colors[ImGuiCol_TextSelectedBg]       = ImVec4(0.29f, 0.55f, 0.78f, 0.35f);
+        colors[ImGuiCol_NavHighlight]         = ImVec4(0.38f, 0.66f, 0.90f, 0.85f);
+        colors[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.03f, 0.04f, 0.05f, 0.72f);
+    }
+
+    void DrawSectionHeading(const char *_title, const char *_description)
+    {
+        ImGui::TextColored(ImVec4(0.72f, 0.82f, 0.92f, 1.0f), "%s", _title);
+        if (_description != nullptr && _description[0] != '\0')
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", _description);
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::Spacing();
+    }
+
+    bool PrimaryButton(const char *_label, const ImVec2 &_size)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.42f, 0.61f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.52f, 0.73f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.36f, 0.54f, 1.00f));
+        const bool pressed = ImGui::Button(_label, _size);
+        ImGui::PopStyleColor(3);
+        return pressed;
+    }
+
     fs::path GetDefaultProjectsDirectory()
     {
         if (const char *home = std::getenv("HOME"))
@@ -1244,8 +1326,9 @@ namespace
         }
 
         const float contentWidth = ImGui::GetContentRegionAvail().x;
+        DrawSectionHeading("Building your project", "CanisPack is preparing the selected release and compiling the editor.");
         ImGui::TextUnformatted(step.empty() ? "Preparing project..." : step.c_str());
-        ImGui::ProgressBar(std::clamp(progress, 0.0f, 1.0f), ImVec2(contentWidth, 0.0f));
+        ImGui::ProgressBar(std::clamp(progress, 0.0f, 1.0f), ImVec2(contentWidth, 8.0f));
 
         ImGui::Spacing();
         const float errorHeight = error.empty() ? 0.0f : 74.0f;
@@ -1398,38 +1481,86 @@ namespace
             ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoSavedSettings);
 
-        ImGui::SetCursorPos(ImVec2(28.0f, 24.0f));
-        ImGui::TextUnformatted("CanisPack");
-        ImGui::SetCursorPosX(28.0f);
-        ImGui::TextDisabled("Version %s", CANISPACK_VERSION);
-        ImGui::Separator();
+        const ImVec2 headerStart = ImGui::GetCursorScreenPos();
+        const float headerWidth = ImGui::GetContentRegionAvail().x;
+        ImDrawList *drawList = ImGui::GetWindowDrawList();
+        drawList->AddRectFilled(
+            headerStart,
+            ImVec2(headerStart.x + headerWidth, headerStart.y + 78.0f),
+            ImGui::GetColorU32(ImVec4(0.105f, 0.118f, 0.145f, 1.0f)),
+            5.0f);
+        drawList->AddRectFilled(
+            headerStart,
+            ImVec2(headerStart.x + 5.0f, headerStart.y + 78.0f),
+            ImGui::GetColorU32(ImVec4(0.29f, 0.55f, 0.78f, 1.0f)),
+            5.0f,
+            ImDrawFlags_RoundCornersLeft);
 
-        const float sideWidth = std::min(380.0f, std::max(300.0f, io.DisplaySize.x * 0.34f));
-        ImGui::BeginChild("Projects", ImVec2(sideWidth, 0.0f), true);
-        ImGui::TextUnformatted("Projects");
-        ImGui::Spacing();
+        ImGui::SetCursorPos(ImVec2(38.0f, 27.0f));
+        ImGui::TextColored(ImVec4(0.88f, 0.92f, 0.97f, 1.0f), "CANIS");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextColored(ImVec4(0.36f, 0.64f, 0.87f, 1.0f), "PACK");
+        ImGui::SameLine();
+        ImGui::TextDisabled("Project Hub");
+
+        const std::string versionLabel = std::string("v") + CANISPACK_VERSION;
+        const float versionWidth = ImGui::CalcTextSize(versionLabel.c_str()).x + 22.0f;
+        ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - versionWidth - 30.0f, 24.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.145f, 0.162f, 0.195f, 1.0f));
+        ImGui::Button(versionLabel.c_str(), ImVec2(versionWidth, 30.0f));
+        ImGui::PopStyleColor();
+
+        ImGui::SetCursorPosY(110.0f);
+        const float sideWidth = std::min(390.0f, std::max(300.0f, io.DisplaySize.x * 0.34f));
+        ImGui::BeginChild("Projects", ImVec2(sideWidth, -48.0f), true);
+        std::size_t validProjectCount = 0;
+        for (const fs::path &projectPath : _state.recentProjects)
+        {
+            if (IsProjectDirectory(projectPath))
+                ++validProjectCount;
+        }
+
+        DrawSectionHeading("Recent Projects", "Jump back into a Canis project.");
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 18.0f);
+        ImGui::TextDisabled("%zu", validProjectCount);
+
+        if (validProjectCount == 0)
+        {
+            ImGui::Spacing();
+            ImGui::TextDisabled("No recent projects yet.");
+            ImGui::TextDisabled("Create one or open an existing project.");
+        }
+
         for (const fs::path &projectPath : _state.recentProjects)
         {
             if (!IsProjectDirectory(projectPath))
                 continue;
 
-            const std::string label = GetProjectDisplayName(projectPath) + "##" + projectPath.generic_string();
-            if (ImGui::Selectable(label.c_str(), false))
+            const std::string projectName = GetProjectDisplayName(projectPath);
+            const std::string label = projectName + "\n" + projectPath.generic_string() + "##" + projectPath.generic_string();
+            if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0.0f, 58.0f)))
                 OpenProject(_state, projectPath, _running);
 
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", projectPath.generic_string().c_str());
+
+            ImGui::Spacing();
         }
         ImGui::EndChild();
 
         ImGui::SameLine();
 
-        ImGui::BeginChild("Actions", ImVec2(0.0f, 0.0f), true);
-        ImGui::TextUnformatted("Create Project");
-        ImGui::Spacing();
-        ImGui::InputText("Name", &_state.projectName);
+        ImGui::BeginChild("Actions", ImVec2(0.0f, -48.0f), false);
+        const float actionWidth = ImGui::GetContentRegionAvail().x;
+        const float createHeight = std::max(410.0f, ImGui::GetContentRegionAvail().y - 190.0f);
+        ImGui::BeginChild("CreateCard", ImVec2(actionWidth, createHeight), true);
+        DrawSectionHeading("Create a New Project", "Start from a tagged CanisTemplate release.");
 
-        ImGui::TextUnformatted("Location");
+        ImGui::TextDisabled("PROJECT");
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::InputText("##ProjectName", &_state.projectName);
+
+        ImGui::TextDisabled("LOCATION");
         ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 104.0f));
         ImGui::InputText("##ProjectLocation", &_state.projectLocation);
         ImGui::SameLine();
@@ -1445,7 +1576,9 @@ namespace
         ImGui::TextDisabled("%s", projectFolder.c_str());
 
         ImGui::Spacing();
-        ImGui::TextUnformatted("Template");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextDisabled("TEMPLATE SOURCE");
         ImGui::TextUnformatted("Clone with");
         ImGui::SameLine();
         if (ImGui::RadioButton("SSH", _state.templateCloneProtocol == CloneProtocol::SSH))
@@ -1472,7 +1605,8 @@ namespace
             SaveConfig(_state);
         }
 
-        if (ImGui::InputText("Repository", &_state.templateRepository))
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::InputText("##TemplateRepository", &_state.templateRepository))
         {
             _state.templateCloneProtocol = InferCloneProtocol(_state.templateRepository);
             _state.templateTags.clear();
@@ -1481,7 +1615,8 @@ namespace
         }
 
         const std::string releasePreview = _state.selectedTemplateTag.empty() ? "No release selected" : _state.selectedTemplateTag;
-        if (ImGui::BeginCombo("Release", releasePreview.c_str()))
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::BeginCombo("##TemplateRelease", releasePreview.c_str()))
         {
             if (_state.templateTags.empty())
             {
@@ -1519,12 +1654,12 @@ namespace
             }
         }
 
-        ImGui::Spacing();
+        ImGui::SameLine();
         const bool projectTaskBusy = IsProjectTaskRunning(_state.projectTask);
         if (projectTaskBusy)
             ImGui::BeginDisabled();
 
-        if (ImGui::Button("Create and Open", ImVec2(160.0f, 34.0f)))
+        if (PrimaryButton("Create Project", ImVec2(170.0f, 38.0f)))
         {
             StartCreateProjectTask(_state);
         }
@@ -1532,11 +1667,11 @@ namespace
         if (projectTaskBusy)
             ImGui::EndDisabled();
 
+        ImGui::EndChild();
+
         ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        ImGui::TextUnformatted("Open Existing");
-        ImGui::TextUnformatted("Project Path");
+        ImGui::BeginChild("OpenCard", ImVec2(actionWidth, 142.0f), true);
+        DrawSectionHeading("Open an Existing Project", "Choose a folder containing a Canis project.");
         ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 144.0f));
         ImGui::InputText("##OpenProjectPath", &_state.openProjectPath);
         ImGui::SameLine();
@@ -1548,21 +1683,23 @@ namespace
             ShowFolderDialog(_state, _window, FolderDialogTarget::OpenExistingProject, GetFolderDialogDefaultLocation(defaultLocation));
         }
 
-        if (ImGui::Button("Open Project", ImVec2(140.0f, 34.0f)))
+        if (PrimaryButton("Open Project", ImVec2(140.0f, 34.0f)))
             OpenProject(_state, _state.openProjectPath, _running);
+        ImGui::EndChild();
 
-        ImGui::Spacing();
-        if (ImGui::Checkbox("Close CanisPack after launch", &_state.closeAfterLaunch))
+        ImGui::EndChild();
+
+        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 34.0f);
+        if (ImGui::Checkbox("Close after launch", &_state.closeAfterLaunch))
             SaveConfig(_state);
 
         if (!_state.message.empty())
         {
-            ImGui::Spacing();
-            const ImVec4 color = _state.messageIsError ? ImVec4(1.0f, 0.36f, 0.30f, 1.0f) : ImVec4(0.40f, 0.82f, 0.50f, 1.0f);
+            ImGui::SameLine(0.0f, 28.0f);
+            const ImVec4 color = _state.messageIsError ? ImVec4(1.0f, 0.40f, 0.34f, 1.0f) : ImVec4(0.42f, 0.82f, 0.55f, 1.0f);
             ImGui::TextColored(color, "%s", _state.message.c_str());
         }
 
-        ImGui::EndChild();
         ImGui::End();
 
         DrawProjectTaskPopup(_state);
@@ -1584,7 +1721,7 @@ int main(int, char **)
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-    SDL_Window *window = SDL_CreateWindow("CanisPack", 960, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    SDL_Window *window = SDL_CreateWindow("CanisPack", 1120, 760, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (window == nullptr)
     {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
@@ -1608,9 +1745,10 @@ int main(int, char **)
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    ApplyCanisPackTheme();
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.IniFilename = nullptr;
     SetCanisPackDefaultFont(io);
 
     ImGui_ImplSDL3_InitForOpenGL(window, glContext);
@@ -1661,7 +1799,7 @@ int main(int, char **)
         int drawableHeight = 0;
         SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight);
         glViewport(0, 0, drawableWidth, drawableHeight);
-        glClearColor(0.09f, 0.10f, 0.12f, 1.0f);
+        glClearColor(0.075f, 0.085f, 0.105f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
