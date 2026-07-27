@@ -721,9 +721,34 @@ namespace
             return false;
         }
 
-        const CommandResult result = RunCommandCapture("git ls-remote --tags --refs " + ShellQuote(repository));
+        // Release discovery never needs push credentials. Prefer GitHub's
+        // public HTTPS endpoint even when the user clones templates over SSH,
+        // avoiding SSH-agent and interactive authentication stalls.
+        const std::string releaseRepository =
+            ConvertGitHubRepositoryProtocol(repository, CloneProtocol::HTTPS).value_or(repository);
+
+#if defined(_WIN32)
+        const std::string command =
+            "set GIT_TERMINAL_PROMPT=0&& git ls-remote --tags --refs " + ShellQuote(releaseRepository);
+#else
+        constexpr int releaseRefreshTimeoutSeconds = 15;
+        const std::string command =
+            "GIT_TERMINAL_PROMPT=0 timeout --signal=TERM --kill-after=2s " +
+            std::to_string(releaseRefreshTimeoutSeconds) +
+            "s git ls-remote --tags --refs " + ShellQuote(releaseRepository);
+#endif
+
+        const CommandResult result = RunCommandCapture(command);
         if (result.exitCode != 0)
         {
+#if !defined(_WIN32)
+            if (result.exitCode == 124)
+            {
+                _outError = "Template release lookup timed out after 15 seconds. Check the network connection and try again.";
+                return false;
+            }
+#endif
+
             _outError = "Could not fetch template releases.";
             if (!result.output.empty())
                 _outError += "\n" + result.output;
