@@ -506,6 +506,106 @@ namespace
         return sanitized.empty() ? "NewCanisProject" : sanitized;
     }
 
+    bool IsValidExecutableName(const std::string &_name)
+    {
+        if (_name.empty())
+            return false;
+
+        return std::all_of(_name.begin(), _name.end(), [](unsigned char c)
+        {
+            return std::isalnum(c) != 0 || c == '_' || c == '.' || c == '+' || c == '-';
+        });
+    }
+
+    std::string ReadProjectExecutableName(const fs::path &_configPath)
+    {
+        if (!IsFile(_configPath))
+            return "c-engine";
+
+        try
+        {
+            const YAML::Node root = YAML::LoadFile(_configPath.string());
+            const std::string executableName = TrimCopy(root["executableName"].as<std::string>(""));
+            if (IsValidExecutableName(executableName))
+                return executableName;
+        }
+        catch (const YAML::Exception &)
+        {
+        }
+
+        return "c-engine";
+    }
+
+    bool WriteProjectIdentity(
+        const fs::path &_configPath,
+        const std::string &_gameName,
+        const std::string &_executableName,
+        std::string &_outError)
+    {
+        try
+        {
+            YAML::Node root;
+            if (IsFile(_configPath))
+                root = YAML::LoadFile(_configPath.string());
+
+            root["gameName"] = _gameName;
+            root["executableName"] = _executableName;
+
+            std::error_code ec;
+            fs::create_directories(_configPath.parent_path(), ec);
+            if (ec)
+            {
+                _outError = "Could not create project settings directory: " + _configPath.parent_path().generic_string();
+                return false;
+            }
+
+            std::ofstream output(_configPath);
+            if (!output.is_open())
+            {
+                _outError = "Could not write project settings: " + _configPath.generic_string();
+                return false;
+            }
+
+            output << root;
+            if (!output.good())
+            {
+                _outError = "Could not finish writing project settings: " + _configPath.generic_string();
+                return false;
+            }
+        }
+        catch (const YAML::Exception &_exception)
+        {
+            _outError = "Could not update project settings: " + std::string(_exception.what());
+            return false;
+        }
+
+        return true;
+    }
+
+    bool ConfigureGeneratedProjectIdentity(
+        const ProjectCreateSettings &_settings,
+        const fs::path &_workspacePath,
+        const fs::path &_projectPath,
+        std::string &_outError)
+    {
+        const std::string trimmedName = TrimCopy(_settings.projectName);
+        const std::string gameName = trimmedName.empty() ? "New Canis Project" : trimmedName;
+        const std::string executableName = SanitizeProjectFolderName(gameName);
+
+        const fs::path sourceConfigPath = _workspacePath / "project_settings" / "project.canis";
+        if (!WriteProjectIdentity(sourceConfigPath, gameName, executableName, _outError))
+            return false;
+
+        const fs::path runtimeConfigPath = _projectPath / "project_settings" / "project.canis";
+        if (WeaklyCanonicalPath(runtimeConfigPath) != WeaklyCanonicalPath(sourceConfigPath) &&
+            !WriteProjectIdentity(runtimeConfigPath, gameName, executableName, _outError))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     std::string ShellQuote(const std::string &_value)
     {
 #if defined(_WIN32)
@@ -890,11 +990,20 @@ namespace
 
     fs::path GetBuiltEditorExecutable(const fs::path &_workspacePath)
     {
+        const std::string executableName = ReadProjectExecutableName(
+            _workspacePath / "project_settings" / "project.canis");
 #if defined(_WIN32)
-        return _workspacePath / "project" / "c-engine.exe";
+        const fs::path configuredExecutable = _workspacePath / "project" / (executableName + ".exe");
+        const fs::path legacyExecutable = _workspacePath / "project" / "c-engine.exe";
 #else
-        return _workspacePath / "project" / "c-engine";
+        const fs::path configuredExecutable = _workspacePath / "project" / executableName;
+        const fs::path legacyExecutable = _workspacePath / "project" / "c-engine";
 #endif
+
+        if (IsFile(configuredExecutable) || executableName == "c-engine" || !IsFile(legacyExecutable))
+            return configuredExecutable;
+
+        return legacyExecutable;
     }
 
     fs::path GetProjectEditorExecutable(const fs::path &_projectPath)
@@ -904,10 +1013,19 @@ namespace
             return GetBuiltEditorExecutable(projectPath.parent_path());
 
 #if defined(_WIN32)
-        return projectPath / "c-engine.exe";
+        const std::string executableName = ReadProjectExecutableName(projectPath / "project_settings" / "project.canis");
+        const fs::path configuredExecutable = projectPath / (executableName + ".exe");
+        const fs::path legacyExecutable = projectPath / "c-engine.exe";
 #else
-        return projectPath / "c-engine";
+        const std::string executableName = ReadProjectExecutableName(projectPath / "project_settings" / "project.canis");
+        const fs::path configuredExecutable = projectPath / executableName;
+        const fs::path legacyExecutable = projectPath / "c-engine";
 #endif
+
+        if (IsFile(configuredExecutable) || executableName == "c-engine" || !IsFile(legacyExecutable))
+            return configuredExecutable;
+
+        return legacyExecutable;
     }
 
     bool CloneTemplateProject(
@@ -1012,6 +1130,14 @@ namespace
 
         _outWorkspacePath = WeaklyCanonicalPath(projectPath);
         _outProjectPath = *normalizedProjectPath;
+        SetProjectTaskStep(_task, "Applying project identity...", 0.40f);
+        if (!ConfigureGeneratedProjectIdentity(
+                _settings, _outWorkspacePath, _outProjectPath, _outError))
+        {
+            fs::remove_all(projectPath, ec);
+            return false;
+        }
+
         return true;
     }
 
@@ -1599,6 +1725,7 @@ namespace
 
         const std::string projectFolder = (fs::path(_state.projectLocation) / SanitizeProjectFolderName(_state.projectName)).generic_string();
         ImGui::TextDisabled("%s", projectFolder.c_str());
+        ImGui::TextDisabled("Executable: %s", SanitizeProjectFolderName(_state.projectName).c_str());
 
         ImGui::Spacing();
         ImGui::Separator();

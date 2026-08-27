@@ -12,10 +12,13 @@ Startup flow:
 2. A user creates or opens a project.
 3. For new projects, CanisPack fetches release tags from CanisTemplate.
 4. CanisPack clones the selected template tag with submodules into the new project folder.
-5. CanisPack configures and builds a new workspace, or an existing workspace whose editor executable is missing.
-6. CanisPack launches the workspace's `project/c-engine` as a background process.
-7. The selected Canis project folder is passed with `CANIS_PROJECT=/path/to/project`.
-8. The engine opens that project directly.
+5. For new projects, CanisPack writes the entered project name to `gameName`
+   and its filesystem-safe form to `executableName` in both settings copies.
+6. CanisPack configures and builds a new workspace, or an existing workspace whose editor executable is missing.
+7. CanisPack reads `executableName` from `project_settings/project.canis` and
+   launches the matching executable under `project/` as a background process.
+8. The selected Canis project folder is passed with `CANIS_PROJECT=/path/to/project`.
+9. The engine opens that project directly.
 
 The standalone app uses small direct submodules:
 
@@ -39,7 +42,7 @@ Useful environment variables:
 Keep the small launch contract with Canis:
 
 ```bash
-CANIS_PROJECT=/path/to/project /path/to/project/c-engine
+CANIS_PROJECT=/path/to/project /path/to/project/<executableName>
 ```
 
 That keeps CanisPack lightweight while each project workspace owns the editor/runtime it was built with.
@@ -74,4 +77,4 @@ project-name/
   README.md
 ```
 
-CanisPack accepts either the workspace root or the nested `project/` folder when opening an existing project. If `project/c-engine` is missing and the parent workspace has `CMakeLists.txt`, CanisPack configures and builds that workspace before launching.
+CanisPack accepts either the workspace root or the nested `project/` folder when opening an existing project. If the executable named by `project_settings/project.canis` is missing and the parent workspace has `CMakeLists.txt`, CanisPack configures and builds that workspace before launching. Older templates without `executableName` continue to use `c-engine`.
