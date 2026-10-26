@@ -1,3 +1,5 @@
+#include "ProjectExecutable.hpp"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_opengl.h>
@@ -32,6 +34,8 @@
 
 namespace
 {
+    using CanisPack::GetBuiltEditorExecutable;
+    using CanisPack::GetProjectEditorExecutable;
     namespace fs = std::filesystem;
 
     enum class ProjectTaskKind
@@ -506,36 +510,6 @@ namespace
         return sanitized.empty() ? "NewCanisProject" : sanitized;
     }
 
-    bool IsValidExecutableName(const std::string &_name)
-    {
-        if (_name.empty())
-            return false;
-
-        return std::all_of(_name.begin(), _name.end(), [](unsigned char c)
-        {
-            return std::isalnum(c) != 0 || c == '_' || c == '.' || c == '+' || c == '-';
-        });
-    }
-
-    std::string ReadProjectExecutableName(const fs::path &_configPath)
-    {
-        if (!IsFile(_configPath))
-            return "c-engine";
-
-        try
-        {
-            const YAML::Node root = YAML::LoadFile(_configPath.string());
-            const std::string executableName = TrimCopy(root["executableName"].as<std::string>(""));
-            if (IsValidExecutableName(executableName))
-                return executableName;
-        }
-        catch (const YAML::Exception &)
-        {
-        }
-
-        return "c-engine";
-    }
-
     bool WriteProjectIdentity(
         const fs::path &_configPath,
         const std::string &_gameName,
@@ -986,46 +960,6 @@ namespace
         {
             AppendProjectTaskLog(_task, _chunk);
         });
-    }
-
-    fs::path GetBuiltEditorExecutable(const fs::path &_workspacePath)
-    {
-        const std::string executableName = ReadProjectExecutableName(
-            _workspacePath / "project_settings" / "project.canis");
-#if defined(_WIN32)
-        const fs::path configuredExecutable = _workspacePath / "project" / (executableName + ".exe");
-        const fs::path legacyExecutable = _workspacePath / "project" / "c-engine.exe";
-#else
-        const fs::path configuredExecutable = _workspacePath / "project" / executableName;
-        const fs::path legacyExecutable = _workspacePath / "project" / "c-engine";
-#endif
-
-        if (IsFile(configuredExecutable) || executableName == "c-engine" || !IsFile(legacyExecutable))
-            return configuredExecutable;
-
-        return legacyExecutable;
-    }
-
-    fs::path GetProjectEditorExecutable(const fs::path &_projectPath)
-    {
-        const fs::path projectPath = WeaklyCanonicalPath(_projectPath);
-        if (projectPath.filename() == "project" && !projectPath.parent_path().empty())
-            return GetBuiltEditorExecutable(projectPath.parent_path());
-
-#if defined(_WIN32)
-        const std::string executableName = ReadProjectExecutableName(projectPath / "project_settings" / "project.canis");
-        const fs::path configuredExecutable = projectPath / (executableName + ".exe");
-        const fs::path legacyExecutable = projectPath / "c-engine.exe";
-#else
-        const std::string executableName = ReadProjectExecutableName(projectPath / "project_settings" / "project.canis");
-        const fs::path configuredExecutable = projectPath / executableName;
-        const fs::path legacyExecutable = projectPath / "c-engine";
-#endif
-
-        if (IsFile(configuredExecutable) || executableName == "c-engine" || !IsFile(legacyExecutable))
-            return configuredExecutable;
-
-        return legacyExecutable;
     }
 
     bool CloneTemplateProject(

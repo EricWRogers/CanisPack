@@ -21,7 +21,7 @@ sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 pkgver() {
   cd "$srcdir/CanisPack"
-  git describe --long --tags --always | sed 's/^v//;s/-/.r/;s/-/./g'
+  printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 prepare() {
@@ -38,6 +38,7 @@ prepare() {
 build() {
   cmake -S "$srcdir/CanisPack" -B "$srcdir/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF \
     -DCMAKE_INSTALL_PREFIX=/usr
   cmake --build "$srcdir/build"
 }

@@ -70,6 +70,19 @@ Created projects use the full CanisTemplate workspace shape. CanisPack keeps the
 
 When opening an existing full workspace, CanisPack accepts either the workspace root or the nested `project/` folder. If the workspace's editor executable is missing, CanisPack configures and builds the workspace before launching.
 
+The launcher reads `executableName` from the workspace's `project_settings/project.canis`,
+then falls back to the runtime project's settings if that name is missing or invalid.
+Projects without a configured name use `c-engine`. An explicit custom name is never
+replaced by a leftover `c-engine` binary; the configured executable must be built.
+
+Run executable-discovery tests with:
+
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --target CanisPackProjectExecutableTests
+ctest --test-dir build --output-on-failure
+```
+
 ## Direction
 
 CanisPack should eventually become a standalone launcher that can:
