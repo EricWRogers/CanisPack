@@ -1,4 +1,5 @@
 #include "ProjectExecutable.hpp"
+#include "ProjectBuild.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -21,6 +22,7 @@
 #include <functional>
 #include <fstream>
 #include <mutex>
+#include <map>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -94,6 +96,11 @@ namespace
         std::string projectName = "New Canis Project";
         std::string projectLocation = "";
         std::string openProjectPath = "";
+        std::vector<CanisPack::BuildChoice> buildChoices = CanisPack::BuildChoicesFromPresetList("");
+        std::map<std::string, std::string> projectBuildChoices;
+        std::string selectedBuildChoice = "Release";
+        std::string presetWorkspace;
+        std::string presetError;
         std::string templateRepository = CANISPACK_TEMPLATE_REPOSITORY;
         CloneProtocol templateCloneProtocol = CloneProtocol::SSH;
         std::vector<std::string> templateTags = {};
@@ -874,6 +881,9 @@ namespace
             }
             _state.selectedTemplateTag = root["templateRelease"].as<std::string>(_state.selectedTemplateTag);
             _state.closeAfterLaunch = root["closeAfterLaunch"].as<bool>(_state.closeAfterLaunch);
+            if (const auto choices = root["projectBuildChoices"]; choices && choices.IsMap())
+                for (const auto& entry : choices)
+                    _state.projectBuildChoices[entry.first.as<std::string>()] = entry.second.as<std::string>();
 
             if (const YAML::Node recent = root["recentProjects"])
             {
@@ -896,6 +906,8 @@ namespace
         root["templateCloneProtocol"] = CloneProtocolToConfigString(_state.templateCloneProtocol);
         root["templateRelease"] = _state.selectedTemplateTag;
         root["closeAfterLaunch"] = _state.closeAfterLaunch;
+        for (const auto& [project, choice] : _state.projectBuildChoices)
+            root["projectBuildChoices"][project] = choice;
 
         YAML::Node recent(YAML::NodeType::Sequence);
         for (const fs::path &projectPath : _state.recentProjects)
@@ -1159,42 +1171,97 @@ namespace
         return LaunchProjectWithExecutable(executablePath, _projectPath, _outError);
     }
 
-    bool BuildProjectWorkspace(const fs::path &_workspacePath, ProjectTask &_task, std::string &_outError)
+    std::string CommandLine(const std::vector<std::string>& arguments)
     {
-        const fs::path buildPath = _workspacePath / "build";
-
-        SetProjectTaskStep(_task, "Configuring project build...", _task.kind == ProjectTaskKind::CreateAndOpen ? 0.50f : 0.15f);
-        const std::string configureCommand =
-            "cmake -S " + ShellQuote(_workspacePath.string()) + " -B " + ShellQuote(buildPath.string());
-
-        const CommandResult configureResult = RunProjectTaskCommand(_task, configureCommand);
-        if (configureResult.exitCode != 0)
+        std::string command;
+        for (const auto& argument : arguments)
         {
-            _outError = (_task.kind == ProjectTaskKind::CreateAndOpen) ?
-                "Could not configure the new project build. Review the build log above for CMake output." :
-                "Could not configure the project build. Review the build log above for CMake output.";
+            if (!command.empty()) command += " ";
+            command += ShellQuote(argument);
+        }
+        return command;
+    }
+
+    void RefreshBuildChoices(AppState& state, bool force = false)
+    {
+        const auto project = NormalizeProjectPath(state.openProjectPath);
+        const auto workspace = project ? ResolveProjectWorkspace(*project) : std::nullopt;
+        const auto key = workspace ? workspace->string() : "";
+        if (!force && key == state.presetWorkspace) return;
+        state.presetWorkspace = key;
+        state.presetError.clear();
+        state.buildChoices = CanisPack::BuildChoicesFromPresetList("");
+        if (workspace && (IsFile(*workspace / "CMakePresets.json") || IsFile(*workspace / "CMakeUserPresets.json")))
+        {
+            // Let CMake resolve includes, inheritance, hidden presets and host conditions.
+            const auto result = RunCommandCapture(CommandLine({"cmake", "--list-presets=configure", "-S", workspace->string()}));
+            if (result.exitCode == 0)
+                state.buildChoices = CanisPack::BuildChoicesFromPresetList(result.output);
+            else
+                state.presetError = "Could not list project presets: " + result.output;
+        }
+        const auto saved = project ? state.projectBuildChoices.find(project->generic_string()) : state.projectBuildChoices.end();
+        state.selectedBuildChoice = CanisPack::FindBuildChoice(state.buildChoices,
+            saved == state.projectBuildChoices.end() ? "Release" : saved->second).id;
+    }
+
+    bool BuildProjectWorkspace(const fs::path& workspace, const CanisPack::BuildChoice& choice,
+                               ProjectTask& task, fs::path& executable, std::string& error)
+    {
+        try
+        {
+            const auto build = CanisPack::GetBuildDirectory(workspace, choice);
+            CanisPack::PrepareBuildQuery(build);
+            SetProjectTaskStep(task, "Configuring " + choice.label + "...", 0.15f);
+            auto arguments = CanisPack::ConfigureArguments(workspace, choice);
+            if (RunProjectTaskCommand(task, CommandLine(arguments)).exitCode != 0)
+            {
+                error = "Could not configure the selected build. Review the CMake log above.";
+                return false;
+            }
+            if (!CanisPack::CanLaunchEditorBuild(build, error)) return false;
+            // Single-configuration presets without a build type must still be optimized.
+            if (CanisPack::ReadBuildCache(build, "CMAKE_BUILD_TYPE").empty() &&
+                CanisPack::ReadBuildCache(build, "CMAKE_CONFIGURATION_TYPES").empty())
+            {
+                arguments.push_back("-DCMAKE_BUILD_TYPE=Release");
+                if (RunProjectTaskCommand(task, CommandLine(arguments)).exitCode != 0)
+                {
+                    error = "Could not set the default Release configuration.";
+                    return false;
+                }
+            }
+            std::string target;
+            executable = CanisPack::FindBuildExecutable(build, GetBuiltEditorExecutable(workspace).filename().string(), target);
+            std::vector<std::string> buildArguments = {"cmake", "--build", build.string(), "--config",
+                CanisPack::BuildConfiguration(build), "--target", target, "--parallel",
+                std::to_string(std::min(6u, std::max(1u, std::thread::hardware_concurrency())))};
+            // Older templates ignore the runtime-output override. Their shared outputs
+            // need a clean rebuild so timestamps cannot select another configuration.
+            const auto relative = executable.lexically_relative(build);
+            if (relative.empty() || *relative.begin() == "..")
+            {
+                AppendProjectTaskLog(task, "Legacy shared output directory: rebuilding selected configuration.\n");
+                buildArguments.push_back("--clean-first");
+            }
+            SetProjectTaskStep(task, "Building " + choice.label + " editor...", 0.55f);
+            if (RunProjectTaskCommand(task, CommandLine(buildArguments)).exitCode != 0)
+            {
+                error = "Could not build the selected editor. Review the compiler log above.";
+                return false;
+            }
+            if (!IsFile(executable))
+            {
+                error = "Build finished, but the selected editor executable was not found: " + executable.generic_string();
+                return false;
+            }
+            return true;
+        }
+        catch (const std::exception& exception)
+        {
+            error = "Could not prepare the selected build: " + std::string(exception.what());
             return false;
         }
-
-        SetProjectTaskStep(_task, "Building editor...", _task.kind == ProjectTaskKind::CreateAndOpen ? 0.75f : 0.55f);
-        const std::string buildCommand = "cmake --build " + ShellQuote(buildPath.string()) + " --parallel";
-        const CommandResult buildResult = RunProjectTaskCommand(_task, buildCommand);
-        if (buildResult.exitCode != 0)
-        {
-            _outError = (_task.kind == ProjectTaskKind::CreateAndOpen) ?
-                "Could not build the new project. Review the build log above for compiler output." :
-                "Could not build the project. Review the build log above for compiler output.";
-            return false;
-        }
-
-        const fs::path editorExecutable = GetBuiltEditorExecutable(_workspacePath);
-        if (!IsFile(editorExecutable))
-        {
-            _outError = "Build finished, but the editor executable was not found: " + editorExecutable.generic_string();
-            return false;
-        }
-
-        return true;
     }
 
     bool IsProjectTaskRunning(ProjectTask &_task)
@@ -1266,13 +1333,14 @@ namespace
                 return;
             }
 
-            if (!BuildProjectWorkspace(workspacePath, *task, error))
+            fs::path executable;
+            if (!BuildProjectWorkspace(workspacePath, CanisPack::BuildChoice{}, *task, executable, error))
             {
                 CompleteProjectTask(*task, false, error.empty() ? "Could not build project." : error, workspacePath, projectPath, {});
                 return;
             }
 
-            CompleteProjectTask(*task, true, "", workspacePath, projectPath, GetBuiltEditorExecutable(workspacePath));
+            CompleteProjectTask(*task, true, "", workspacePath, projectPath, executable);
         });
     }
 
@@ -1292,16 +1360,20 @@ namespace
         ResetProjectTask(_state.projectTask, ProjectTaskKind::BuildAndOpen, "Preparing project build...", 0.05f);
 
         ProjectTask *task = &_state.projectTask;
-        task->worker = std::thread([projectPath, workspacePath, task]()
+        const auto choice = CanisPack::FindBuildChoice(_state.buildChoices, _state.selectedBuildChoice);
+        _state.projectBuildChoices[projectPath.generic_string()] = choice.id;
+        SaveConfig(_state);
+        task->worker = std::thread([projectPath, workspacePath, choice, task]()
         {
             std::string error;
-            if (!BuildProjectWorkspace(workspacePath, *task, error))
+            fs::path executable;
+            if (!BuildProjectWorkspace(workspacePath, choice, *task, executable, error))
             {
                 CompleteProjectTask(*task, false, error.empty() ? "Could not build project." : error, workspacePath, projectPath, {});
                 return;
             }
 
-            CompleteProjectTask(*task, true, "", workspacePath, projectPath, GetBuiltEditorExecutable(workspacePath));
+            CompleteProjectTask(*task, true, "", workspacePath, projectPath, executable);
         });
 
         return true;
@@ -1473,21 +1545,15 @@ namespace
             return;
         }
 
-        const fs::path executablePath = GetProjectEditorExecutable(*projectPath);
-        if (!IsFile(executablePath))
+        if (const auto workspace = ResolveProjectWorkspace(*projectPath))
         {
-            const std::optional<fs::path> workspacePath = ResolveProjectWorkspace(*projectPath);
-            if (!workspacePath.has_value())
-            {
-                SetMessage(_state, "Project editor executable not found and no buildable workspace was found for this project.", true);
-                return;
-            }
-
-            if (StartOpenProjectTask(_state, *projectPath, *workspacePath))
+            _state.openProjectPath = projectPath->generic_string();
+            RefreshBuildChoices(_state);
+            if (StartOpenProjectTask(_state, *projectPath, *workspace))
                 SetMessage(_state, "Building " + GetProjectDisplayName(*projectPath) + " before launch.", false);
             return;
         }
-
+        const fs::path executablePath = GetProjectEditorExecutable(*projectPath);
         std::string error;
         if (!LaunchProjectWithExecutable(executablePath, *projectPath, error))
         {
@@ -1545,7 +1611,8 @@ namespace
                 break;
             case FolderDialogTarget::OpenExistingProject:
                 _state.openProjectPath = folderPath.generic_string();
-                OpenProject(_state, folderPath, _running);
+                RefreshBuildChoices(_state, true);
+                SetMessage(_state, "Choose a build target, then Open Project.", false);
                 break;
             case FolderDialogTarget::None:
                 break;
@@ -1605,9 +1672,7 @@ namespace
                 ++validProjectCount;
         }
 
-        DrawSectionHeading("Recent Projects", "Jump back into a Canis project.");
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 18.0f);
-        ImGui::TextDisabled("%zu", validProjectCount);
+        DrawSectionHeading("Recent Projects", "Select a project to configure and open.");
 
         if (validProjectCount == 0)
         {
@@ -1623,8 +1688,14 @@ namespace
 
             const std::string projectName = GetProjectDisplayName(projectPath);
             const std::string label = projectName + "\n" + projectPath.generic_string() + "##" + projectPath.generic_string();
-            if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0.0f, 58.0f)))
-                OpenProject(_state, projectPath, _running);
+            if (ImGui::Selectable(label.c_str(), _state.openProjectPath == projectPath.generic_string(),
+                                  ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, 58.0f)))
+            {
+                _state.openProjectPath = projectPath.generic_string();
+                RefreshBuildChoices(_state, true);
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    OpenProject(_state, projectPath, _running);
+            }
 
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", projectPath.generic_string().c_str());
@@ -1637,7 +1708,59 @@ namespace
 
         ImGui::BeginChild("Actions", ImVec2(0.0f, -48.0f), false);
         const float actionWidth = ImGui::GetContentRegionAvail().x;
-        const float createHeight = std::max(410.0f, ImGui::GetContentRegionAvail().y - 190.0f);
+        const bool projectTaskBusy = IsProjectTaskRunning(_state.projectTask);
+        ImGui::Spacing();
+        ImGui::BeginChild("OpenCard", ImVec2(actionWidth, 242.0f), true);
+        DrawSectionHeading("Open an Existing Project", "Choose a folder containing a Canis project.");
+        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 144.0f));
+        ImGui::InputText("##OpenProjectPath", &_state.openProjectPath);
+        if (ImGui::IsItemDeactivatedAfterEdit()) RefreshBuildChoices(_state, true);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse##OpenProjectPath", ImVec2(136.0f, 0.0f)))
+        {
+            const std::string defaultLocation = !_state.openProjectPath.empty() ?
+                _state.openProjectPath :
+                (_state.projectLocation.empty() ? GetDefaultProjectsDirectory().generic_string() : _state.projectLocation);
+            ShowFolderDialog(_state, _window, FolderDialogTarget::OpenExistingProject, GetFolderDialogDefaultLocation(defaultLocation));
+        }
+
+        RefreshBuildChoices(_state);
+        ImGui::TextDisabled("BUILD TARGET");
+        ImGui::SetNextItemWidth(-1.0f);
+        const auto selectedChoice = CanisPack::FindBuildChoice(_state.buildChoices, _state.selectedBuildChoice);
+        if (ImGui::BeginCombo("##BuildTarget", selectedChoice.label.c_str()))
+        {
+            for (const auto& choice : _state.buildChoices)
+            {
+                const bool selected = choice.id == _state.selectedBuildChoice;
+                if (ImGui::Selectable(choice.label.c_str(), selected))
+                {
+                    _state.selectedBuildChoice = choice.id;
+                    if (const auto project = NormalizeProjectPath(_state.openProjectPath))
+                        _state.projectBuildChoices[project->generic_string()] = choice.id;
+                    SaveConfig(_state);
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        if (!_state.presetError.empty())
+        {
+            ImGui::TextColored(ImVec4(1, .4f, .34f, 1), "Project presets unavailable (?)");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", _state.presetError.c_str());
+        }
+        if (const auto project = NormalizeProjectPath(_state.openProjectPath); project && !ResolveProjectWorkspace(*project))
+            ImGui::TextDisabled("Standalone project: uses its packaged editor.");
+        else
+            ImGui::TextDisabled("Release by default. Builds the selected target before launch.");
+        ImGui::BeginDisabled(projectTaskBusy);
+        if (PrimaryButton("Open Project", ImVec2(140.0f, 34.0f)))
+            OpenProject(_state, _state.openProjectPath, _running);
+        ImGui::EndDisabled();
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+        const float createHeight = std::max(460.0f, ImGui::GetContentRegionAvail().y);
         ImGui::BeginChild("CreateCard", ImVec2(actionWidth, createHeight), true);
         DrawSectionHeading("Create a New Project", "Start from a tagged CanisTemplate release.");
 
@@ -1741,7 +1864,6 @@ namespace
         }
 
         ImGui::SameLine();
-        const bool projectTaskBusy = IsProjectTaskRunning(_state.projectTask);
         if (projectTaskBusy)
             ImGui::BeginDisabled();
 
@@ -1753,24 +1875,6 @@ namespace
         if (projectTaskBusy)
             ImGui::EndDisabled();
 
-        ImGui::EndChild();
-
-        ImGui::Spacing();
-        ImGui::BeginChild("OpenCard", ImVec2(actionWidth, 142.0f), true);
-        DrawSectionHeading("Open an Existing Project", "Choose a folder containing a Canis project.");
-        ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 144.0f));
-        ImGui::InputText("##OpenProjectPath", &_state.openProjectPath);
-        ImGui::SameLine();
-        if (ImGui::Button("Browse and Open##OpenProjectPath", ImVec2(136.0f, 0.0f)))
-        {
-            const std::string defaultLocation = !_state.openProjectPath.empty() ?
-                _state.openProjectPath :
-                (_state.projectLocation.empty() ? GetDefaultProjectsDirectory().generic_string() : _state.projectLocation);
-            ShowFolderDialog(_state, _window, FolderDialogTarget::OpenExistingProject, GetFolderDialogDefaultLocation(defaultLocation));
-        }
-
-        if (PrimaryButton("Open Project", ImVec2(140.0f, 34.0f)))
-            OpenProject(_state, _state.openProjectPath, _running);
         ImGui::EndChild();
 
         ImGui::EndChild();
@@ -1807,7 +1911,7 @@ int main(int, char **)
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-    SDL_Window *window = SDL_CreateWindow("CanisPack", 1120, 760, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    SDL_Window *window = SDL_CreateWindow("CanisPack", 1120, 860, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (window == nullptr)
     {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());

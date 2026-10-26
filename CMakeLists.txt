@@ -60,7 +60,7 @@ target_link_libraries(CanisPackImGui PRIVATE SDL3::SDL3)
 
 find_package(OpenGL REQUIRED)
 
-add_library(CanisPackProjectExecutable STATIC src/ProjectExecutable.cpp)
+add_library(CanisPackProjectExecutable STATIC src/ProjectExecutable.cpp src/ProjectBuild.cpp)
 target_include_directories(CanisPackProjectExecutable PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(CanisPackProjectExecutable PUBLIC yaml-cpp)
 
@@ -69,6 +69,9 @@ if(BUILD_TESTING)
     add_executable(CanisPackProjectExecutableTests tests/ProjectExecutableTests.cpp)
     target_link_libraries(CanisPackProjectExecutableTests PRIVATE CanisPackProjectExecutable)
     add_test(NAME CanisPackProjectExecutableTests COMMAND CanisPackProjectExecutableTests)
+    add_executable(CanisPackProjectBuildTests tests/ProjectBuildTests.cpp)
+    target_link_libraries(CanisPackProjectBuildTests PRIVATE CanisPackProjectExecutable)
+    add_test(NAME CanisPackProjectBuildTests COMMAND CanisPackProjectBuildTests)
 endif()
 
 add_executable(CanisPack src/main.cpp)
